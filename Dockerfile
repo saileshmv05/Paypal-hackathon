@@ -1,12 +1,18 @@
 # Production Dockerfile for ClearSettle
-FROM node:20-alpine AS builder
+# Using Node 22 (Debian slim) to satisfy better-sqlite3@13+ requirement and glibc support
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Install native build tools for C++ bindings (node-gyp / better-sqlite3)
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+# Install root dependencies
 COPY package*.json ./
-COPY client/package*.json ./client/
 RUN npm install
+
+# Install client dependencies
+COPY client/package*.json ./client/
 RUN npm install --prefix client
 
 # Copy application code
@@ -17,7 +23,7 @@ RUN npm run seed
 RUN npm run build
 
 # Production Runner
-FROM node:20-alpine AS runner
+FROM node:22-slim AS runner
 
 WORKDIR /app
 
@@ -30,3 +36,4 @@ COPY --from=builder /app /app
 EXPOSE 5000
 
 CMD ["npm", "run", "server"]
+

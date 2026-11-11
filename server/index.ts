@@ -1761,9 +1761,9 @@ app.get('{*path}', (req, res, next) => {
   next();
 });
 
-app.listen(PORT, () => {
+app.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`=======================================================`);
-  console.log(` ClearSettle Backend API running at http://localhost:${PORT}`);
+  console.log(` ClearSettle Backend API running at http://0.0.0.0:${PORT}`);
   console.log(` Multi-currency Ledger & PayPal Sandbox Ready`);
   console.log(` Tamper-Evident SHA-256 Audit Chain Active`);
   console.log(` Personal & Small Business Workspaces Enabled`);
