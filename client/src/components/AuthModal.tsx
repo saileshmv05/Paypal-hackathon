@@ -39,36 +39,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   // Initialize official Google Identity Services button if real client ID is present
   useEffect(() => {
-    if (googleConfig.enabled && googleConfig.clientId && (window as any).google?.accounts?.id && googleBtnRef.current) {
-      try {
-        (window as any).google.accounts.id.initialize({
-          client_id: googleConfig.clientId,
-          callback: async (response: any) => {
-            if (response.credential) {
-              setLoading(true);
-              setError(null);
-              try {
-                const res = await loginWithGoogle({ credential: response.credential });
-                onAuthSuccess(res.user);
-                onClose();
-              } catch (err: any) {
-                setError(err.message || 'Google Sign-In failed');
-              } finally {
-                setLoading(false);
+    let checkTimer: any = null;
+    let attempts = 0;
+
+    const initGsi = () => {
+      attempts++;
+      if (googleConfig.enabled && googleConfig.clientId && (window as any).google?.accounts?.id && googleBtnRef.current) {
+        try {
+          (window as any).google.accounts.id.initialize({
+            client_id: googleConfig.clientId,
+            callback: async (response: any) => {
+              if (response.credential) {
+                setLoading(true);
+                setError(null);
+                try {
+                  const res = await loginWithGoogle({ credential: response.credential });
+                  onAuthSuccess(res.user);
+                  onClose();
+                } catch (err: any) {
+                  setError(err.message || 'Google Sign-In failed');
+                } finally {
+                  setLoading(false);
+                }
               }
-            }
-          },
-        });
-        (window as any).google.accounts.id.renderButton(googleBtnRef.current, {
-          theme: 'outline',
-          size: 'large',
-          width: '100%',
-          text: mode === 'REGISTER' ? 'signup_with' : 'signin_with',
-        });
-      } catch (e) {
-        console.warn('Google GSI initialization notice:', e);
+            },
+          });
+          if (googleBtnRef.current) {
+            googleBtnRef.current.innerHTML = '';
+            (window as any).google.accounts.id.renderButton(googleBtnRef.current, {
+              theme: 'outline',
+              size: 'large',
+              width: 360,
+              text: mode === 'REGISTER' ? 'signup_with' : 'signin_with',
+            });
+          }
+          if (checkTimer) clearInterval(checkTimer);
+        } catch (e) {
+          console.warn('Google GSI initialization notice:', e);
+        }
+      } else if (attempts > 10 && checkTimer) {
+        clearInterval(checkTimer);
       }
-    }
+    };
+
+    initGsi();
+    checkTimer = setInterval(initGsi, 300);
+    return () => {
+      if (checkTimer) clearInterval(checkTimer);
+    };
   }, [googleConfig, mode, isOpen]);
 
   if (!isOpen) return null;
