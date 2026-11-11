@@ -1,6 +1,6 @@
 export type CurrencyCode = 'EUR' | 'USD' | 'GBP' | 'INR' | 'JPY';
 
-export type SplitType = 'EQUAL' | 'EXACT' | 'PERCENT';
+export type SplitType = 'EQUAL' | 'EXACT' | 'PERCENT' | 'SHARES';
 export type ExpenseStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
 export type AIClassification = 
   | 'CONFIRMED_EXPENSE'
@@ -8,6 +8,18 @@ export type AIClassification =
   | 'PAYMENT_PROMISE'
   | 'PROPOSED_EXPENSE'
   | 'UNRESOLVED';
+
+export type ReconciliationMatchStatus =
+  | 'MATCHED'
+  | 'PARTIALLY_PAID'
+  | 'PARTIALLY_MATCHED'
+  | 'OVERPAID'
+  | 'UNDERPAID'
+  | 'FAILED'
+  | 'PENDING'
+  | 'UNMATCHED'
+  | 'NEEDS_REVIEW'
+  | 'REQUIRES_REVIEW';
 
 export interface GroupMember {
   id: string;
@@ -108,15 +120,16 @@ export interface SettlementPlan {
   transfers: SettlementTransfer[];
 }
 
-export type ReconciliationMatchStatus =
-  | 'MATCHED'
-  | 'PARTIALLY_MATCHED'
-  | 'OVERPAID'
-  | 'UNDERPAID'
-  | 'FAILED'
-  | 'PENDING'
-  | 'UNMATCHED'
-  | 'REQUIRES_REVIEW';
+export type ProvenanceBadge = 'LEDGER' | 'ESTIMATE' | 'QUOTE' | 'PAYPAL-CAPTURE' | 'SIMULATED' | 'MANUAL' | 'UNVERIFIED';
+
+export interface UserContext {
+  id: string;
+  name: string;
+  email: string;
+  role: 'ADMIN' | 'MEMBER' | 'OWNER';
+  groupIds: string[];
+  workspaceIds: string[];
+}
 
 export interface ReconciliationRecord {
   id: string;
@@ -125,7 +138,7 @@ export interface ReconciliationRecord {
   provider: string;
   status: string;
   match_status?: ReconciliationMatchStatus;
-  capture_provenance?: 'PAYPAL-CAPTURE' | 'SIMULATED';
+  capture_provenance?: 'PAYPAL-CAPTURE' | 'SIMULATED' | 'MANUAL';
   from_member_name?: string;
   to_member_name?: string;
 

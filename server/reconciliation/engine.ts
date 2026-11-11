@@ -154,7 +154,7 @@ export function buildReconciliationRecord(params: BuildReconciliationParams): Re
     provider,
     status,
     matchStatus,
-    captureProvenance: provider === 'PAYPAL_SANDBOX' ? 'PAYPAL-CAPTURE' : 'SIMULATED',
+    captureProvenance: provider === 'PAYPAL_SANDBOX' ? 'PAYPAL-CAPTURE' : provider === 'MANUAL' ? 'MANUAL' : 'SIMULATED',
     ledgerOriginalAmount,
     ledgerOriginalCurrency,
     ledgerReferenceRate,

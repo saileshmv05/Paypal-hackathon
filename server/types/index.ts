@@ -159,15 +159,17 @@ export interface CaptureResult {
 
 export type ReconciliationMatchStatus =
   | 'MATCHED'
+  | 'PARTIALLY_PAID'
   | 'PARTIALLY_MATCHED'
   | 'OVERPAID'
   | 'UNDERPAID'
   | 'FAILED'
   | 'PENDING'
   | 'UNMATCHED'
+  | 'NEEDS_REVIEW'
   | 'REQUIRES_REVIEW';
 
-export type ProvenanceBadge = 'LEDGER' | 'ESTIMATE' | 'QUOTE' | 'PAYPAL-CAPTURE' | 'SIMULATED';
+export type ProvenanceBadge = 'LEDGER' | 'ESTIMATE' | 'QUOTE' | 'PAYPAL-CAPTURE' | 'SIMULATED' | 'MANUAL' | 'UNVERIFIED';
 
 export interface ReconciliationRecord {
   id: string;
@@ -176,7 +178,7 @@ export interface ReconciliationRecord {
   provider: ProviderType;
   status: ReconciliationStatus;
   matchStatus?: ReconciliationMatchStatus;
-  captureProvenance: 'PAYPAL-CAPTURE' | 'SIMULATED';
+  captureProvenance: 'PAYPAL-CAPTURE' | 'SIMULATED' | 'MANUAL';
   
   // 1. Group Ledger Value
   ledgerOriginalAmount: string;

@@ -6,7 +6,21 @@ import { v4 as uuidv4 } from 'uuid';
 export const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
 /**
- * Computes a deterministic SHA-256 hash for an audit event block
+ * Deterministically serializes metadata with sorted keys for tamper-evident hashing.
+ */
+export function canonicalizeMetadata(obj: any): string {
+  if (obj === null || obj === undefined) return '';
+  if (typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) {
+    return '[' + obj.map(canonicalizeMetadata).join(',') + ']';
+  }
+  const sortedKeys = Object.keys(obj).sort();
+  const pairs = sortedKeys.map((k) => `${JSON.stringify(k)}:${canonicalizeMetadata(obj[k])}`);
+  return '{' + pairs.join(',') + '}';
+}
+
+/**
+ * Computes a deterministic SHA-256 hash for an audit event block, including canonical metadata.
  */
 export function computeEventHash(params: {
   id: string;
@@ -16,9 +30,11 @@ export function computeEventHash(params: {
   eventType: string;
   actor: string;
   description: string;
+  metadata?: Record<string, any>;
   prevHash: string;
   createdAt: string;
 }): string {
+  const canonicalMeta = canonicalizeMetadata(params.metadata || {});
   const payload = [
     params.id,
     params.groupId,
@@ -27,6 +43,7 @@ export function computeEventHash(params: {
     params.eventType,
     params.actor,
     params.description,
+    canonicalMeta,
     params.prevHash,
     params.createdAt,
   ].join('|');
@@ -35,7 +52,9 @@ export function computeEventHash(params: {
 }
 
 /**
- * Records an immutable, tamper-evident audit event cryptographically linked to the previous event.
+ * Records a tamper-evident audit event cryptographically linked to the previous event block.
+ * Note: Tamper-evident logging protects against undetected modifications within the ledger,
+ * but does not constitute an immutable distributed blockchain against full database rewrites.
  */
 export function recordAuditEvent(params: {
   groupId: string;
@@ -65,6 +84,7 @@ export function recordAuditEvent(params: {
     eventType: params.eventType,
     actor: params.actor,
     description: params.description,
+    metadata,
     prevHash,
     createdAt,
   });
@@ -114,6 +134,7 @@ export interface AuditVerificationResult {
  * Verifies the mathematical integrity of the cryptographic audit chain.
  * Detects:
  * - Modified events (hash mismatch)
+ * - Modified metadata (metadata hash mismatch)
  * - Deleted or missing events (chain link broken)
  * - Broken chronological order
  */
@@ -137,7 +158,14 @@ export function verifyAuditChain(groupId: string): AuditVerificationResult {
       );
     }
 
-    // 2. Recalculate event hash and compare
+    // 2. Parse metadata and recalculate event hash
+    let parsedMetadata = {};
+    try {
+      parsedMetadata = typeof e.metadata === 'string' ? JSON.parse(e.metadata) : e.metadata || {};
+    } catch {
+      parsedMetadata = {};
+    }
+
     const computed = computeEventHash({
       id: e.id,
       groupId: e.group_id,
@@ -146,6 +174,7 @@ export function verifyAuditChain(groupId: string): AuditVerificationResult {
       eventType: e.event_type,
       actor: e.actor,
       description: e.description,
+      metadata: parsedMetadata,
       prevHash: e.prev_hash,
       createdAt: e.created_at,
     });

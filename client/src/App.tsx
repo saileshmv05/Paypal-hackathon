@@ -22,6 +22,8 @@ import {
   fetchReconciliations,
   fetchAuditEvents,
   resetDemoData,
+  initDemoSession,
+  getAuthToken,
 } from './api/client';
 import {
   Group,
@@ -112,6 +114,14 @@ export function App() {
   const initialLoad = async () => {
     setLoading(true);
     try {
+      if (!getAuthToken()) {
+        try {
+          await initDemoSession('alex-organizer');
+        } catch (authErr) {
+          console.warn('Could not initialize demo session:', authErr);
+        }
+      }
+
       const [groupsRes, configRes] = await Promise.all([fetchGroups(), fetchConfig()]);
       setGroups(groupsRes);
       setSystemConfig(configRes);

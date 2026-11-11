@@ -19,6 +19,7 @@ import {
 import { Group, ReconciliationRecord, SettlementTransfer } from '../types';
 import { PayPalSandboxNotice, UnobservableFeesNote } from '../components/Disclaimers';
 import { createPayPalOrder, capturePayPalOrder, fetchEvidenceSummary } from '../api/client';
+import { PaymentEvidenceTimeline } from '../components/PaymentEvidenceTimeline';
 
 interface ReconciliationPageProps {
   group: Group | null;
@@ -29,7 +30,7 @@ interface ReconciliationPageProps {
 }
 
 export const ProvenanceBadge: React.FC<{
-  type: 'LEDGER' | 'ESTIMATE' | 'QUOTE' | 'PAYPAL-CAPTURE' | 'SIMULATED';
+  type: 'LEDGER' | 'ESTIMATE' | 'QUOTE' | 'PAYPAL-CAPTURE' | 'SIMULATED' | 'MANUAL' | 'UNVERIFIED';
 }> = ({ type }) => {
   switch (type) {
     case 'LEDGER':
@@ -54,6 +55,13 @@ export const ProvenanceBadge: React.FC<{
       return (
         <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
           PAYPAL-CAPTURE
+        </span>
+      );
+    case 'MANUAL':
+    case 'UNVERIFIED':
+      return (
+        <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-purple-50 text-purple-800 border border-purple-200">
+          MANUAL
         </span>
       );
     case 'SIMULATED':
@@ -489,6 +497,11 @@ export const ReconciliationPage: React.FC<ReconciliationPageProps> = ({
                 <div className="p-4 bg-white border-t border-slate-100 text-xs text-slate-600 space-y-1">
                   <div className="font-semibold text-slate-800">ClearSettle Financial Provenance Analysis:</div>
                   <p className="leading-relaxed">{rec.explanation}</p>
+                </div>
+
+                {/* End-to-End Payment Evidence Timeline */}
+                <div className="p-4 bg-slate-50 border-t border-slate-100">
+                  <PaymentEvidenceTimeline reconciliation={rec} />
                 </div>
               </div>
             );

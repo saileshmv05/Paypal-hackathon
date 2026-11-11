@@ -17,7 +17,17 @@ import { getPaymentProvider } from './paypal/client';
 import { buildReconciliationRecord } from './reconciliation/engine';
 import { seedDatabase } from './seed';
 import { recordAuditEvent, verifyAuditChain } from './audit/chain';
-import { authMiddleware, requireGroupAccess, requireWorkspaceAccess, requireAdmin } from './middleware/auth';
+import {
+  authMiddleware,
+  requireAuth,
+  requireGroupAccess,
+  requireWorkspaceAccess,
+  requireAdmin,
+  createSession,
+  destroySession,
+  DEMO_PERSONAS,
+} from './middleware/auth';
+import { calculateExpenseSplits } from './financial/splits';
 import { CurrencyCode, Expense, GroupMember, SettlementTransfer } from './types';
 
 dotenv.config();
@@ -29,8 +39,71 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(authMiddleware);
 
+// In-memory IP rate limiter for sensitive endpoints
+const ipRequestCounts = new Map<string, { count: number; resetAt: number }>();
+function rateLimiter(limit: number, windowMs: number) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const entry = ipRequestCounts.get(ip);
+    if (!entry || now > entry.resetAt) {
+      ipRequestCounts.set(ip, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    if (entry.count >= limit) {
+      return res.status(429).json({
+        error: 'Too many requests. Rate limit exceeded, please retry later.',
+        code: 'RATE_LIMIT_EXCEEDED',
+      });
+    }
+    entry.count++;
+    next();
+  };
+}
+
 // Ensure database tables and column migrations exist
 initDatabase();
+
+// ----------------------------------------------------------------------
+// AUTHENTICATION & DEMO PERSONA MANAGEMENT
+// ----------------------------------------------------------------------
+app.get('/api/auth/personas', (req, res) => {
+  const personas = Object.entries(DEMO_PERSONAS).map(([key, p]) => ({
+    key,
+    id: p.id,
+    name: p.name,
+    email: p.email,
+    role: p.role,
+    groupIds: p.groupIds,
+    workspaceIds: p.workspaceIds,
+    description: p.description,
+  }));
+  res.json(personas);
+});
+
+app.post('/api/auth/demo-session', rateLimiter(40, 60000), (req, res) => {
+  const { persona = 'alex-organizer' } = req.body;
+  try {
+    const session = createSession(persona);
+    res.json(session);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/session', (req: any, res) => {
+  if (!req.user) {
+    return res.status(401).json({ authenticated: false, user: null });
+  }
+  res.json({ authenticated: true, user: req.user });
+});
+
+app.post('/api/auth/logout', (req: any, res) => {
+  if (req.token) {
+    destroySession(req.token);
+  }
+  res.json({ success: true, message: 'Logged out successfully.' });
+});
 
 // ----------------------------------------------------------------------
 // CONFIGURATION & PROVIDER STATUS
@@ -224,17 +297,53 @@ app.post('/api/groups/:id/expenses', requireGroupAccess, (req, res) => {
     originalAmount,
     originalCurrency,
     splitMemberIds,
+    customSplits,
     splitType = 'EQUAL',
     evidenceType = 'MANUAL',
     evidenceRef = '',
   } = req.body;
 
-  if (!payerId || !description || !originalAmount || !originalCurrency || !splitMemberIds || splitMemberIds.length === 0) {
-    return res.status(400).json({ error: 'Missing required expense fields' });
+  if (!payerId || !description || !originalAmount || !originalCurrency) {
+    return res.status(400).json({ error: 'Missing required expense fields: payerId, description, originalAmount, originalCurrency.' });
+  }
+
+  // Reject negative or zero amounts
+  try {
+    const amtDec = toDecimal(originalAmount);
+    if (amtDec.isNegative() || amtDec.isZero()) {
+      return res.status(400).json({ error: 'Expense amount must be strictly greater than 0.' });
+    }
+  } catch {
+    return res.status(400).json({ error: `Invalid monetary amount: ${originalAmount}` });
   }
 
   const group: any = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   if (!group) return res.status(404).json({ error: 'Group not found' });
+
+  const groupMembers: any[] = db.prepare('SELECT id FROM group_members WHERE group_id = ?').all(req.params.id);
+  const allowedMemberIds = groupMembers.map((m) => m.id);
+
+  let participants: any[] = [];
+  if (customSplits && Array.isArray(customSplits) && customSplits.length > 0) {
+    participants = customSplits;
+  } else if (splitMemberIds && Array.isArray(splitMemberIds) && splitMemberIds.length > 0) {
+    participants = splitMemberIds.map((mId: string) => ({ memberId: mId }));
+  } else {
+    participants = allowedMemberIds.map((mId: string) => ({ memberId: mId }));
+  }
+
+  let splitResults;
+  try {
+    splitResults = calculateExpenseSplits({
+      totalAmount: originalAmount,
+      currency: originalCurrency,
+      splitType,
+      participants,
+      allowedMemberIds,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message, code: 'SPLIT_CALCULATION_ERROR' });
+  }
 
   const id = `exp-${uuidv4().substring(0, 8)}`;
   const createdAt = new Date().toISOString();
@@ -242,9 +351,6 @@ app.post('/api/groups/:id/expenses', requireGroupAccess, (req, res) => {
   // Convert to base currency with reference rates
   const conversion = convertCurrency(originalAmount, originalCurrency, group.base_currency);
   const baseAmount = conversion.toAmount;
-
-  // Calculate splits with integer minor unit precision
-  const splitAmounts = splitAmountEqually(originalAmount, originalCurrency, splitMemberIds.length);
 
   const insertExpense = db.prepare(`
     INSERT INTO expenses (
@@ -284,10 +390,9 @@ app.post('/api/groups/:id/expenses', requireGroupAccess, (req, res) => {
       'Manual Approval'
     );
 
-    splitMemberIds.forEach((mId: string, idx: number) => {
-      const shareOrig = splitAmounts[idx];
-      const shareBaseConv = convertCurrency(shareOrig, originalCurrency, group.base_currency);
-      insertSplit.run(uuidv4(), id, mId, shareOrig, shareBaseConv.toAmount);
+    splitResults.forEach((s) => {
+      const shareBaseConv = convertCurrency(s.shareAmount, originalCurrency, group.base_currency);
+      insertSplit.run(uuidv4(), id, s.memberId, s.shareAmount, shareBaseConv.toAmount);
     });
 
     recordAuditEvent({
@@ -295,9 +400,9 @@ app.post('/api/groups/:id/expenses', requireGroupAccess, (req, res) => {
       entityType: 'EXPENSE',
       entityId: id,
       eventType: 'EXPENSE_RECORDED',
-      actor: 'Admin',
+      actor: (req as any).user?.name || 'Admin',
       description: `Added expense "${description}" for ${originalAmount} ${originalCurrency} (Base: ${baseAmount} ${group.base_currency})`,
-      metadata: { originalAmount, originalCurrency, baseAmount },
+      metadata: { originalAmount, originalCurrency, baseAmount, splitType, participantsCount: splitResults.length },
     });
   });
 
@@ -313,6 +418,8 @@ app.post('/api/groups/:id/expenses', requireGroupAccess, (req, res) => {
     baseAmount,
     exchangeRate: conversion.effectiveRate,
     rateSource: conversion.rateSource,
+    splitType,
+    splits: splitResults,
     createdAt,
   });
 });
@@ -666,7 +773,7 @@ app.post('/api/groups/:id/ai/items/:itemId/reject', requireGroupAccess, (req, re
 // ----------------------------------------------------------------------
 // PAYPAL CHECKOUT LIFECYCLE & SERVER-SIDE AUTHORIZATION
 // ----------------------------------------------------------------------
-app.post('/api/paypal/create-order', async (req, res) => {
+app.post('/api/paypal/create-order', requireAuth, rateLimiter(30, 60000), async (req: any, res) => {
   const { transferId, invoiceId, obligationType = 'SETTLEMENT' } = req.body;
 
   let targetAmount = '';
@@ -681,6 +788,10 @@ app.post('/api/paypal/create-order', async (req, res) => {
     const invoice: any = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
     if (!invoice) {
       return res.status(404).json({ error: `Invoice obligation ${id} not found.` });
+    }
+    // Authorization check for workspace
+    if (req.user?.role !== 'ADMIN' && !req.user?.workspaceIds?.includes(invoice.workspace_id)) {
+      return res.status(403).json({ error: 'Access denied: You do not have permission to pay for this invoice.' });
     }
     if (invoice.status === 'PAID') {
       return res.status(400).json({ error: 'This invoice has already been paid.' });
@@ -697,6 +808,14 @@ app.post('/api/paypal/create-order', async (req, res) => {
     if (!transfer) {
       return res.status(404).json({ error: `Settlement obligation ${transferId} not found in database.` });
     }
+    const plan: any = db.prepare('SELECT group_id FROM settlement_plans WHERE id = ?').get(transfer.plan_id);
+    groupId = plan?.group_id || 'group-intl-trip-2026';
+
+    // Authorization check for group
+    if (req.user?.role !== 'ADMIN' && !req.user?.groupIds?.includes(groupId)) {
+      return res.status(403).json({ error: 'Access denied: You do not have permission to settle this group debt.' });
+    }
+
     if (transfer.status === 'COMPLETED') {
       return res.status(400).json({ error: 'This settlement obligation is already marked as completed.' });
     }
@@ -706,9 +825,6 @@ app.post('/api/paypal/create-order', async (req, res) => {
     description = `ClearSettle Settlement: ${transfer.from_member_name} to ${transfer.to_member_name}`;
     entityId = transfer.id;
     entityType = 'SETTLEMENT';
-
-    const plan: any = db.prepare('SELECT group_id FROM settlement_plans WHERE id = ?').get(transfer.plan_id);
-    groupId = plan?.group_id || 'group-intl-trip-2026';
   }
 
   const provider = getPaymentProvider();
@@ -733,7 +849,7 @@ app.post('/api/paypal/create-order', async (req, res) => {
         entityId
       );
     } else {
-      db.prepare('UPDATE invoices SET paypal_order_id = ? WHERE id = ?').run(order.providerOrderId, entityId);
+      db.prepare("UPDATE invoices SET paypal_order_id = ?, status = 'ISSUED' WHERE id = ?").run(order.providerOrderId, entityId);
     }
 
     recordAuditEvent({
@@ -741,7 +857,7 @@ app.post('/api/paypal/create-order', async (req, res) => {
       entityType: 'PAYMENT_ORDER',
       entityId: order.providerOrderId,
       eventType: 'ORDER_CREATED',
-      actor: 'Checkout Gateway',
+      actor: req.user?.name || 'Checkout Gateway',
       description: `Created PayPal order ${order.providerOrderId} for ${targetAmount} ${targetCurrency}`,
       metadata: { orderId: order.providerOrderId, entityId, targetAmount, targetCurrency },
     });
@@ -757,7 +873,7 @@ app.post('/api/paypal/create-order', async (req, res) => {
   }
 });
 
-app.post('/api/paypal/capture-order', async (req, res) => {
+app.post('/api/paypal/capture-order', requireAuth, rateLimiter(30, 60000), async (req: any, res) => {
   const { providerOrderId, transferId, invoiceId, groupId } = req.body;
   if (!providerOrderId) {
     return res.status(400).json({ error: 'Missing providerOrderId' });
@@ -767,8 +883,34 @@ app.post('/api/paypal/capture-order', async (req, res) => {
   const transfer: any = db.prepare('SELECT * FROM settlement_transfers WHERE id = ?').get(lookupId);
   const invoice: any = db.prepare('SELECT * FROM invoices WHERE id = ?').get(lookupId);
 
-  const group: any = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId || 'group-intl-trip-2026');
-  const baseCurrency = group?.base_currency || 'EUR';
+  if (!transfer && !invoice) {
+    return res.status(404).json({ error: `Obligation ${lookupId} not found in database.` });
+  }
+
+  // 1. Validate Order Binding: Ensure providerOrderId matches stored paypal_order_id
+  const storedOrderId = transfer ? transfer.paypal_order_id : invoice.paypal_order_id;
+  if (storedOrderId && storedOrderId !== providerOrderId) {
+    return res.status(400).json({
+      error: `Security error: Order ID ${providerOrderId} does not match the stored order ${storedOrderId} for this obligation.`,
+      code: 'ORDER_BINDING_MISMATCH',
+    });
+  }
+
+  // 2. Idempotency Check: Prevent duplicate captures if already completed
+  const currentStatus = transfer ? transfer.status : invoice.status;
+  if (currentStatus === 'COMPLETED' || currentStatus === 'PAID') {
+    const existingRecon: any = db.prepare('SELECT * FROM reconciliations WHERE transfer_id = ?').get(lookupId);
+    return res.json({
+      status: 'COMPLETED',
+      idempotent: true,
+      message: 'Obligation was already successfully captured and reconciled.',
+      reconciliation: existingRecon,
+    });
+  }
+
+  const targetGroupId = groupId || (transfer ? 'group-intl-trip-2026' : invoice.workspace_id);
+  const group: any = db.prepare('SELECT * FROM groups WHERE id = ?').get(targetGroupId);
+  const baseCurrency = group?.base_currency || (invoice ? invoice.currency : 'EUR');
 
   const provider = getPaymentProvider();
 
@@ -786,7 +928,7 @@ app.post('/api/paypal/capture-order', async (req, res) => {
       });
     }
 
-    // Build reconciliation record
+    // Build authoritative transfer representation for reconciliation
     const mockTransfer: SettlementTransfer = transfer
       ? {
           id: transfer.id,
@@ -802,8 +944,7 @@ app.post('/api/paypal/capture-order', async (req, res) => {
           estimatedFee: transfer.estimated_fee,
           status: 'COMPLETED',
         }
-      : invoice
-      ? {
+      : {
           id: invoice.id,
           planId: invoice.workspace_id,
           fromMemberId: invoice.client_name,
@@ -815,20 +956,6 @@ app.post('/api/paypal/capture-order', async (req, res) => {
           targetAmount: invoice.amount,
           targetCurrency: invoice.currency,
           estimatedFee: '0.00',
-          status: 'COMPLETED',
-        }
-      : {
-          id: lookupId || 'tx-active',
-          planId: 'plan-active',
-          fromMemberId: 'payer',
-          fromMemberName: 'Payer',
-          toMemberId: 'payee',
-          toMemberName: 'Payee',
-          amount: normalizedCapture.grossAmount,
-          currency: normalizedCapture.grossCurrency,
-          targetAmount: normalizedCapture.grossAmount,
-          targetCurrency: normalizedCapture.grossCurrency,
-          estimatedFee: normalizedCapture.feeAmount,
           status: 'COMPLETED',
         };
 
@@ -928,26 +1055,118 @@ app.post('/api/paypal/capture-order', async (req, res) => {
 
       // 3. Log cryptographic audit event
       recordAuditEvent({
-        groupId: groupId || (invoice ? invoice.workspace_id : 'group-intl-trip-2026'),
+        groupId: targetGroupId,
         entityType: 'CAPTURE',
         entityId: normalizedCapture.providerCaptureId,
         eventType: 'CAPTURE_VERIFIED',
-        actor: 'Server Capture Engine',
+        actor: req.user?.name || 'PayPal Webhook / Return Handler',
         description: `Verified PayPal capture ${normalizedCapture.providerCaptureId}. Gross: ${normalizedCapture.grossAmount} ${normalizedCapture.grossCurrency}, Fee: ${normalizedCapture.feeAmount} ${normalizedCapture.feeCurrency}, Net: ${normalizedCapture.netAmount} ${normalizedCapture.netCurrency}`,
-        metadata: normalizedCapture.rawSanitizedPayload,
+        metadata: {
+          transferId: lookupId,
+          orderId: providerOrderId,
+          captureId: normalizedCapture.providerCaptureId,
+          gross: normalizedCapture.grossAmount,
+          fee: normalizedCapture.feeAmount,
+          net: normalizedCapture.netAmount,
+          matchStatus: recon.matchStatus,
+        },
       });
     });
 
     transaction();
 
     res.json({
-      success: true,
+      status: 'COMPLETED',
       capture: normalizedCapture,
       reconciliation: recon,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Manual external settlement recording (clearly flagged MANUAL / UNVERIFIED)
+app.post('/api/groups/:id/settlements/:transferId/manual-record', requireGroupAccess, (req: any, res) => {
+  const { notes, evidenceRef } = req.body;
+  const transfer: any = db.prepare('SELECT * FROM settlement_transfers WHERE id = ?').get(req.params.transferId);
+  if (!transfer) return res.status(404).json({ error: 'Transfer obligation not found' });
+  if (transfer.status === 'COMPLETED') {
+    return res.status(400).json({ error: 'Transfer obligation is already marked as completed.' });
+  }
+
+  const reconId = uuidv4();
+  const now = new Date().toISOString();
+
+  db.transaction(() => {
+    db.prepare("UPDATE settlement_transfers SET status = 'COMPLETED', reconciliation_id = ? WHERE id = ?").run(
+      reconId,
+      transfer.id
+    );
+
+    db.prepare(`
+      INSERT INTO reconciliations (
+        id, transfer_id, transaction_id, provider, status, capture_provenance,
+        ledger_original_amount, ledger_original_currency,
+        ledger_reference_rate, ledger_rate_source, ledger_rate_timestamp,
+        ledger_converted_base_amount, ledger_base_currency,
+        quote_amount, quote_currency, quote_fx_rate, quote_id, quote_expires_at, quote_status,
+        capture_id, capture_gross_amount, capture_gross_currency,
+        capture_fee_amount, capture_fee_currency, capture_net_amount, capture_net_currency,
+        capture_effective_rate, capture_receivable_amount, capture_receivable_currency,
+        capture_timestamp, diff_ledger_vs_capture_gross, diff_quote_vs_capture_gross,
+        observed_provider_fee, unobservable_charges_estimate, explanation, match_status, decision_trace, created_at
+      ) VALUES (
+        ?, ?, ?, 'MANUAL', 'RECONCILIATION_COMPLETE', 'MANUAL',
+        ?, ?,
+        '1.000000', 'MANUAL_DECLARATION', ?,
+        ?, ?,
+        null, null, null, null, null, 'UNAVAILABLE',
+        ?, ?, ?,
+        '0.00', ?, ?, ?,
+        null, null, null,
+        ?, '0.00', null,
+        '0.00', '0.00', ?, 'MATCHED', ?, ?
+      )
+    `).run(
+      reconId,
+      transfer.id,
+      `MANUAL-${transfer.id.substring(0, 8).toUpperCase()}`,
+      transfer.amount,
+      transfer.currency,
+      now,
+      transfer.amount,
+      transfer.currency,
+      `MANUAL-CAP-${uuidv4().substring(0, 8)}`,
+      transfer.amount,
+      transfer.currency,
+      transfer.currency,
+      transfer.amount,
+      transfer.currency,
+      now,
+      `Manually settled outside PayPal (${notes || 'Direct bank / cash settlement'}). Unverified by payment provider.`,
+      JSON.stringify({
+        expectedAmount: `${transfer.amount} ${transfer.currency}`,
+        capturedGross: `${transfer.amount} ${transfer.currency} (Manual)`,
+        providerFee: `0.00 ${transfer.currency}`,
+        netReceived: `${transfer.amount} ${transfer.currency}`,
+        variance: `0.00 ${transfer.currency}`,
+        summary: `Manually recorded by organizer: ${notes || 'Offline peer settlement'}. Unobservable external processing fees may have applied.`,
+      }),
+      now
+    );
+
+    recordAuditEvent({
+      groupId: req.params.id as string,
+      entityType: 'SETTLEMENT',
+      entityId: transfer.id,
+      eventType: 'MANUAL_SETTLEMENT_RECORDED',
+      actor: req.user?.name || 'Organizer',
+      description: `Manually recorded settlement of ${transfer.amount} ${transfer.currency} from ${transfer.from_member_name} to ${transfer.to_member_name}`,
+      metadata: { transferId: transfer.id, amount: transfer.amount, currency: transfer.currency, notes, evidenceRef },
+    });
+  })();
+
+  res.json({ success: true, reconciliationId: reconId });
 });
 
 // PayPal Return & Cancel Handlers (for real sandbox redirects)

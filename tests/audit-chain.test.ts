@@ -79,4 +79,28 @@ describe('Cryptographic Audit Chain (Tamper-Evident Ledger)', () => {
     const restoredCheck = verifyAuditChain(groupId);
     expect(restoredCheck.isValid).toBe(true);
   });
+
+  it('detects metadata tampering when an attacker modifies transaction metadata in SQLite', () => {
+    const groupId = 'group-intl-trip-2026';
+    const events: any[] = db
+      .prepare('SELECT * FROM audit_events WHERE group_id = ? ORDER BY created_at ASC')
+      .all(groupId);
+    const targetEvent = events[0];
+    const originalMetadata = targetEvent.metadata;
+
+    // Tamper with metadata JSON directly in SQLite
+    db.prepare('UPDATE audit_events SET metadata = ? WHERE id = ?').run(
+      JSON.stringify({ forgedPayout: '999999.00', illicitFeeDiscount: true }),
+      targetEvent.id
+    );
+
+    const tamperedCheck = verifyAuditChain(groupId);
+    expect(tamperedCheck.isValid).toBe(false);
+    expect(tamperedCheck.brokenAtIndex).toBe(0);
+    expect(tamperedCheck.errors[0]).toContain('Tampered content detected');
+
+    // Restore
+    db.prepare('UPDATE audit_events SET metadata = ? WHERE id = ?').run(originalMetadata, targetEvent.id);
+    expect(verifyAuditChain(groupId).isValid).toBe(true);
+  });
 });

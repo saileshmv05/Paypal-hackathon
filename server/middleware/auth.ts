@@ -1,53 +1,184 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { db } from '../db/database';
 import { UserContext } from '../types';
 
-// Default Demo User Identity for development/sandbox mode
-export const DEFAULT_DEMO_USER: UserContext = {
-  id: 'user-alex-admin',
-  name: 'Alex (Organizer)',
-  email: 'alex.munich@example.com',
-  role: 'ADMIN',
-  groupIds: ['group-intl-trip-2026'],
-  workspaceIds: ['workspace-agency-demo'],
-};
-
 export interface AuthenticatedRequest extends Request {
   user?: UserContext;
+  token?: string;
+}
+
+export interface DemoPersona {
+  id: string;
+  name: string;
+  email: string;
+  role: 'ADMIN' | 'MEMBER' | 'OWNER';
+  groupIds: string[];
+  workspaceIds: string[];
+  description: string;
+}
+
+export const DEMO_PERSONAS: Record<string, DemoPersona> = {
+  'alex-organizer': {
+    id: 'user-alex-admin',
+    name: 'Alex (Trip Organizer & Admin)',
+    email: 'alex.munich@example.com',
+    role: 'ADMIN',
+    groupIds: ['group-intl-trip-2026'],
+    workspaceIds: ['workspace-agency-demo'],
+    description: 'Full administrative access across personal group & agency workspace',
+  },
+  'sam-member': {
+    id: 'user-sam-member',
+    name: 'Sam (Travel Participant)',
+    email: 'sam.sanfrancisco@example.com',
+    role: 'MEMBER',
+    groupIds: ['group-intl-trip-2026'],
+    workspaceIds: [], // Strictly no business workspace access!
+    description: 'Regular participant in group-intl-trip-2026; no workspace access',
+  },
+  'agency-owner': {
+    id: 'user-agency-owner',
+    name: 'Elena (Apex Agency Owner)',
+    email: 'elena@apexcreative.agency',
+    role: 'OWNER',
+    groupIds: [], // Strictly no personal travel group access!
+    workspaceIds: ['workspace-agency-demo'],
+    description: 'Business workspace owner with invoice management rights',
+  },
+  'guest-unauthorized': {
+    id: 'user-guest-unauthorized',
+    name: 'Unauthorized Stranger',
+    email: 'unauthorized@attacker.org',
+    role: 'MEMBER',
+    groupIds: ['group-unrelated-foreign'],
+    workspaceIds: ['workspace-unrelated-foreign'],
+    description: 'External unauthorized user to test IDOR access controls',
+  },
+};
+
+// Cryptographically generated session token store
+interface SessionRecord {
+  token: string;
+  user: UserContext;
+  createdAt: number;
+  expiresAt: number;
+}
+
+const activeSessions = new Map<string, SessionRecord>();
+
+// Clean expired sessions periodically
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export function createSession(personaKey: string): { token: string; user: UserContext; expiresAt: string } {
+  const persona = DEMO_PERSONAS[personaKey];
+  if (!persona) {
+    throw new Error(`Unknown persona: ${personaKey}. Available: ${Object.keys(DEMO_PERSONAS).join(', ')}`);
+  }
+
+  // Generate cryptographically strong unguessable random token (256-bit entropy)
+  const token = `cs_${crypto.randomBytes(32).toString('hex')}`;
+  const now = Date.now();
+  const expiresAtMs = now + SESSION_TTL_MS;
+
+  const userContext: UserContext = {
+    id: persona.id,
+    name: persona.name,
+    email: persona.email,
+    role: persona.role,
+    groupIds: [...persona.groupIds],
+    workspaceIds: [...persona.workspaceIds],
+  };
+
+  activeSessions.set(token, {
+    token,
+    user: userContext,
+    createdAt: now,
+    expiresAt: expiresAtMs,
+  });
+
+  return {
+    token,
+    user: userContext,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  };
+}
+
+export function getSession(token: string): UserContext | null {
+  if (!token) return null;
+  const session = activeSessions.get(token);
+  if (!session) return null;
+
+  if (Date.now() > session.expiresAt) {
+    activeSessions.delete(token);
+    return null;
+  }
+
+  return session.user;
+}
+
+export function destroySession(token: string): boolean {
+  return activeSessions.delete(token);
+}
+
+export function clearAllSessions(): void {
+  activeSessions.clear();
 }
 
 /**
  * Authentication Middleware:
- * Inspects Authorization header (Bearer token) or x-user-id / x-user-role.
- * Falls back to DEFAULT_DEMO_USER to maintain seamless judging and offline testing.
+ * Inspects Authorization: Bearer <token> or x-session-token.
+ * NEVER trusts unverified client headers like x-user-role or x-user-id.
+ * Fails closed: unauthenticated requests have req.user = undefined.
  */
 export function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-  const userId = req.headers['x-user-id'] as string;
-  const userRole = (req.headers['x-user-role'] as 'ADMIN' | 'MEMBER' | 'OWNER') || 'ADMIN';
+  let token: string | undefined;
 
-  if (userId) {
-    req.user = {
-      id: userId,
-      name: (req.headers['x-user-name'] as string) || 'Authorized User',
-      email: (req.headers['x-user-email'] as string) || 'user@example.com',
-      role: userRole,
-      groupIds: [(req.headers['x-group-id'] as string) || 'group-intl-trip-2026'],
-      workspaceIds: [(req.headers['x-workspace-id'] as string) || 'workspace-agency-demo'],
-    };
-  } else {
-    // Default seamless authenticated user context
-    req.user = { ...DEFAULT_DEMO_USER };
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else if (typeof req.headers['x-session-token'] === 'string') {
+    token = req.headers['x-session-token'];
   }
 
+  if (token) {
+    const user = getSession(token);
+    if (user) {
+      req.user = user;
+      req.token = token;
+    }
+  }
+
+  // Fail closed: req.user is undefined if no valid session token was presented
+  next();
+}
+
+/**
+ * Ensures the request is authenticated with a valid session token.
+ */
+export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Authentication required. Please authenticate via a valid session token.',
+      code: 'UNAUTHENTICATED',
+    });
+  }
   next();
 }
 
 /**
  * Authorization Guard:
- * Ensures the authenticated user has legitimate access to the requested group.
+ * Ensures the authenticated user has legitimate access to the requested personal group.
  * Prevents Insecure Direct Object References (IDOR).
  */
 export function requireGroupAccess(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Authentication required to access group resources.',
+      code: 'UNAUTHENTICATED',
+    });
+  }
+
   const groupId = req.params.groupId || req.params.id || req.body?.groupId;
 
   if (!groupId) {
@@ -60,19 +191,20 @@ export function requireGroupAccess(req: AuthenticatedRequest, res: Response, nex
     return res.status(404).json({ error: `Group ${groupId} does not exist.` });
   }
 
-  // Admins have access to all demo groups; members must be in group
-  if (req.user?.role === 'ADMIN') {
+  // Admins have access to all demo groups
+  if (req.user.role === 'ADMIN') {
     return next();
   }
 
-  // Check if user is a member of this group
-  const isMember = db
+  // Check if user has explicit membership
+  const isMemberInDb = db
     .prepare('SELECT id FROM group_members WHERE group_id = ? AND (email = ? OR id = ?)')
-    .get(groupId, req.user?.email, req.user?.id);
+    .get(groupId, req.user.email, req.user.id);
 
-  if (!isMember && !req.user?.groupIds.includes(groupId)) {
+  if (!isMemberInDb && !req.user.groupIds.includes(groupId)) {
     return res.status(403).json({
       error: 'Access denied: You do not have permission to view or modify this group ledger.',
+      code: 'FORBIDDEN_GROUP_ACCESS',
     });
   }
 
@@ -83,6 +215,13 @@ export function requireGroupAccess(req: AuthenticatedRequest, res: Response, nex
  * Authorization Guard for Small Business Workspaces
  */
 export function requireWorkspaceAccess(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Authentication required to access business workspace resources.',
+      code: 'UNAUTHENTICATED',
+    });
+  }
+
   const workspaceId = req.params.workspaceId || req.params.id || req.body?.workspaceId;
 
   if (!workspaceId) {
@@ -94,12 +233,13 @@ export function requireWorkspaceAccess(req: AuthenticatedRequest, res: Response,
     return res.status(404).json({ error: `Workspace ${workspaceId} not found.` });
   }
 
-  if (req.user?.role === 'ADMIN' || req.user?.workspaceIds.includes(workspaceId)) {
+  if (req.user.role === 'ADMIN' || req.user.workspaceIds.includes(workspaceId)) {
     return next();
   }
 
   return res.status(403).json({
     error: 'Access denied: You do not have permission to view or manage this business workspace.',
+    code: 'FORBIDDEN_WORKSPACE_ACCESS',
   });
 }
 
@@ -107,6 +247,13 @@ export function requireWorkspaceAccess(req: AuthenticatedRequest, res: Response,
  * Administrative Protection Guard for critical endpoints (e.g. demo reset)
  */
 export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Authentication required for administrative operations.',
+      code: 'UNAUTHENTICATED',
+    });
+  }
+
   const adminSecret = process.env.ADMIN_SECRET;
   const providedSecret = req.headers['x-admin-secret'];
 
@@ -117,8 +264,11 @@ export function requireAdmin(req: AuthenticatedRequest, res: Response, next: Nex
     }
   }
 
-  if (req.user?.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Administrator role required for this operation.' });
+  if (req.user.role !== 'ADMIN') {
+    return res.status(403).json({
+      error: 'Administrator role required for this operation.',
+      code: 'FORBIDDEN_ADMIN_REQUIRED',
+    });
   }
 
   next();
