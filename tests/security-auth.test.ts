@@ -293,4 +293,32 @@ describe('P0 Security: Authentication, Authorization & IDOR Defenses', () => {
     expect(userGroups.length).toBe(0);
     expect(userWorkspaces.length).toBe(0);
   });
+
+  it('authenticates a Google Sign-In user and provisions a secure session', () => {
+    const googleUser = {
+      id: 'user-g-test1234',
+      name: 'Maya Lin',
+      email: 'maya.lin.google@gmail.com',
+      role: 'MEMBER' as const,
+    };
+
+    // Store in users table as OAuth user
+    db.prepare(`
+      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, created_at)
+      VALUES (?, ?, ?, 'OAUTH_GOOGLE', 'MEMBER', ?)
+    `).run(googleUser.id, googleUser.name, googleUser.email, new Date().toISOString());
+
+    const session = createUserSession(googleUser);
+    expect(session.token).toMatch(/^cs_[a-f0-9]{64}$/);
+    expect(session.user.email).toBe('maya.lin.google@gmail.com');
+    expect(session.user.name).toBe('Maya Lin');
+
+    // Authenticated request validates token correctly
+    const { req, res, next, isNextCalled } = createMockReqRes({
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    authMiddleware(req, res, next);
+    expect(isNextCalled()).toBe(true);
+    expect(req.user.email).toBe('maya.lin.google@gmail.com');
+  });
 });

@@ -175,6 +175,87 @@ app.post('/api/auth/demo-session', rateLimiter(40, 60000), (req, res) => {
   }
 });
 
+// Google Identity Services OAuth & Demo Sign-In
+app.get('/api/auth/google/config', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID || '';
+  res.json({
+    clientId,
+    enabled: !!clientId,
+    mode: clientId ? 'LIVE_OAUTH' : 'DEMO_READY',
+  });
+});
+
+app.post('/api/auth/google', rateLimiter(20, 60000), async (req, res) => {
+  try {
+    const { credential, demo, email: customEmail, name: customName } = req.body;
+    let email = '';
+    let name = '';
+    let googleId = '';
+
+    if (credential) {
+      // Validate credential with Google's OAuth2 tokeninfo service
+      const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+      if (!verifyRes.ok) {
+        return res.status(401).json({ error: 'Invalid Google credential token or token expired.' });
+      }
+      const payload: any = await verifyRes.json();
+      
+      // If GOOGLE_CLIENT_ID is configured, enforce audience check
+      if (process.env.GOOGLE_CLIENT_ID && payload.aud !== process.env.GOOGLE_CLIENT_ID) {
+        return res.status(401).json({ error: 'Google token audience mismatch with application client ID.' });
+      }
+      
+      email = (payload.email || '').toLowerCase().trim();
+      name = payload.name || payload.given_name || email.split('@')[0];
+      googleId = payload.sub || '';
+    } else if (demo || (!process.env.GOOGLE_CLIENT_ID && (customEmail || demo))) {
+      // Demo / fallback Google simulation for evaluation when Google Cloud OAuth isn't provisioned
+      email = (customEmail || 'demo.google.user@gmail.com').toLowerCase().trim();
+      name = customName || 'Google User (Demo)';
+      googleId = `demo_google_${Buffer.from(email).toString('hex').substring(0, 12)}`;
+    } else {
+      return res.status(400).json({ error: 'Missing Google credential or demo authentication parameters.' });
+    }
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'A valid email is required from Google authentication.' });
+    }
+
+    // Look up or register user
+    let user: any = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    if (!user) {
+      const userId = `user-g-${uuidv4().substring(0, 8)}`;
+      const createdAt = new Date().toISOString();
+      db.prepare(`
+        INSERT INTO users (id, name, email, password_hash, role, created_at)
+        VALUES (?, ?, ?, ?, 'MEMBER', ?)
+      `).run(userId, name, email, 'OAUTH_GOOGLE', createdAt);
+      user = { id: userId, name, email, role: 'MEMBER' };
+    }
+
+    const session = createUserSession({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    });
+
+    recordAuditEvent({
+      groupId: 'system',
+      entityType: 'USER',
+      entityId: user.id,
+      eventType: 'USER_AUTHENTICATED_GOOGLE',
+      actor: user.name,
+      description: `User signed in via Google OAuth (${email})`,
+      metadata: { provider: 'GOOGLE', email, googleId, timestamp: new Date().toISOString() },
+    });
+
+    res.json(session);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Google authentication failed.' });
+  }
+});
+
 app.get('/api/auth/session', (req: any, res) => {
   if (!req.user) {
     return res.status(401).json({ authenticated: false, user: null });

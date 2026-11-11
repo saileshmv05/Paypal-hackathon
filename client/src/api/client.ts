@@ -82,6 +82,36 @@ export async function loginUser(email: string, password: string): Promise<{ toke
   return data;
 }
 
+export async function getGoogleAuthConfig(): Promise<{ clientId: string; enabled: boolean; mode: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/google/config`);
+    if (!res.ok) return { clientId: '', enabled: false, mode: 'DEMO_READY' };
+    return res.json();
+  } catch {
+    return { clientId: '', enabled: false, mode: 'DEMO_READY' };
+  }
+}
+
+export async function loginWithGoogle(params: {
+  credential?: string;
+  demo?: boolean;
+  email?: string;
+  name?: string;
+}): Promise<{ token: string; user: UserContext }> {
+  const res = await fetch(`${API_BASE}/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Google authentication failed');
+  }
+  const data = await res.json();
+  setAuthToken(data.token);
+  return data;
+}
+
 export async function fetchAuthSession(): Promise<{ authenticated: boolean; user: UserContext | null }> {
   const res = await fetch(`${API_BASE}/auth/session`, {
     headers: getHeaders(),
