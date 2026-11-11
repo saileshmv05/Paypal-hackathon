@@ -702,8 +702,11 @@ app.get('/api/groups/:id/settlement', requireGroupAccess, (req, res) => {
     }
   }
 
-  syncPlanToDatabase(minTransfersPlan, 'MIN_TRANSFERS');
-  syncPlanToDatabase(minCostPlan, 'MIN_COST');
+  // Atomically synchronize generated settlement strategies to database so every transfer is an authoritative DB obligation
+  db.transaction(() => {
+    syncPlanToDatabase(minTransfersPlan, 'MIN_TRANSFERS');
+    syncPlanToDatabase(minCostPlan, 'MIN_COST');
+  })();
 
   res.json({
     baseCurrency: group.base_currency,
