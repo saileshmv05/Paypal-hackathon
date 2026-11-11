@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: clearsettle-fintech
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run seed && npm run build
+    startCommand: npm run server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ENABLE_DEMO_PROVIDER
+        value: "true"
+      - key: DEFAULT_BASE_CURRENCY
+        value: EUR
