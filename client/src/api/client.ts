@@ -298,6 +298,12 @@ export async function fetchReconciliations(groupId: string): Promise<Reconciliat
   return res.json();
 }
 
+export async function fetchWorkspaceReconciliations(workspaceId: string): Promise<ReconciliationRecord[]> {
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/reconciliations`, { headers: getHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch workspace reconciliations');
+  return res.json();
+}
+
 // ----------------------------------------------------------------------
 // SMALL BUSINESS WORKSPACE & INVOICING API
 // ----------------------------------------------------------------------

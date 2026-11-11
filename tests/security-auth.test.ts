@@ -214,4 +214,34 @@ describe('P0 Security: Authentication, Authorization & IDOR Defenses', () => {
     requireAuth(guardCheck.req, guardCheck.res, guardCheck.next);
     expect(guardCheck.getStatus()).toBe(401);
   });
+
+  it('strictly scopes reconciliation records between personal groups and business workspaces', () => {
+    // Query group reconciliations
+    const groupRecons: any[] = db.prepare(`
+      SELECT r.*, t.from_member_name, t.to_member_name
+      FROM reconciliations r
+      JOIN settlement_transfers t ON r.transfer_id = t.id
+      JOIN settlement_plans p ON t.plan_id = p.id
+      WHERE p.group_id = ?
+      ORDER BY r.created_at DESC
+    `).all('group-intl-trip-2026');
+
+    // Query workspace reconciliations
+    const workspaceRecons: any[] = db.prepare(`
+      SELECT r.*, i.invoice_number, i.client_name, i.description as invoice_description
+      FROM reconciliations r
+      JOIN invoices i ON r.transfer_id = i.id
+      WHERE i.workspace_id = ?
+      ORDER BY r.created_at DESC
+    `).all('workspace-agency-demo');
+
+    expect(groupRecons.length).toBeGreaterThan(0);
+    expect(workspaceRecons.length).toBeGreaterThan(0);
+
+    // Ensure zero overlap: no group reconciliation leaks into workspace and vice-versa
+    const groupIds = new Set(groupRecons.map((r) => r.id));
+    for (const wRec of workspaceRecons) {
+      expect(groupIds.has(wRec.id)).toBe(false);
+    }
+  });
 });

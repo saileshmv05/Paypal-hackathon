@@ -1312,9 +1312,28 @@ app.get('/api/groups/:id/reconciliations', requireGroupAccess, (req, res) => {
   const records: any[] = db.prepare(`
     SELECT r.*, t.from_member_name, t.to_member_name
     FROM reconciliations r
-    LEFT JOIN settlement_transfers t ON r.transfer_id = t.id
+    JOIN settlement_transfers t ON r.transfer_id = t.id
+    JOIN settlement_plans p ON t.plan_id = p.id
+    WHERE p.group_id = ?
     ORDER BY r.created_at DESC
-  `).all();
+  `).all(req.params.id);
+
+  const parsed = records.map((r) => ({
+    ...r,
+    decisionTrace: r.decision_trace ? JSON.parse(r.decision_trace) : undefined,
+  }));
+
+  res.json(parsed);
+});
+
+app.get('/api/workspaces/:id/reconciliations', requireWorkspaceAccess, (req, res) => {
+  const records: any[] = db.prepare(`
+    SELECT r.*, i.invoice_number, i.client_name, i.description as invoice_description
+    FROM reconciliations r
+    JOIN invoices i ON r.transfer_id = i.id
+    WHERE i.workspace_id = ?
+    ORDER BY r.created_at DESC
+  `).all(req.params.id);
 
   const parsed = records.map((r) => ({
     ...r,
@@ -1437,7 +1456,14 @@ app.get('/api/groups/:id/export/json', requireGroupAccess, (req, res) => {
   const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
   const members = db.prepare('SELECT * FROM group_members WHERE group_id = ?').all(req.params.id);
   const expenses = db.prepare('SELECT * FROM expenses WHERE group_id = ?').all(req.params.id);
-  const reconciliations = db.prepare('SELECT * FROM reconciliations').all();
+  const reconciliations = db.prepare(`
+    SELECT r.*, t.from_member_name, t.to_member_name
+    FROM reconciliations r
+    JOIN settlement_transfers t ON r.transfer_id = t.id
+    JOIN settlement_plans p ON t.plan_id = p.id
+    WHERE p.group_id = ?
+    ORDER BY r.created_at DESC
+  `).all(req.params.id);
   const audit = db.prepare('SELECT * FROM audit_events WHERE group_id = ?').all(req.params.id);
   const verification = verifyAuditChain(req.params.id as string);
 
@@ -1454,6 +1480,38 @@ app.get('/api/groups/:id/export/json', requireGroupAccess, (req, res) => {
     group,
     members,
     expenses,
+    reconciliations,
+    auditTrail: audit,
+  });
+});
+
+app.get('/api/workspaces/:id/export/json', requireWorkspaceAccess, (req, res) => {
+  const workspace = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(req.params.id);
+  const clients = db.prepare('SELECT * FROM clients WHERE workspace_id = ?').all(req.params.id);
+  const invoices = db.prepare('SELECT * FROM invoices WHERE workspace_id = ?').all(req.params.id);
+  const reconciliations = db.prepare(`
+    SELECT r.*, i.invoice_number, i.client_name
+    FROM reconciliations r
+    JOIN invoices i ON r.transfer_id = i.id
+    WHERE i.workspace_id = ?
+    ORDER BY r.created_at DESC
+  `).all(req.params.id);
+  const audit = db.prepare('SELECT * FROM audit_events WHERE group_id = ?').all(req.params.id);
+  const verification = verifyAuditChain(req.params.id as string);
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="ClearSettle_Workspace_Audit_${req.params.id}.json"`);
+  res.json({
+    exportMetadata: {
+      generatedAt: new Date().toISOString(),
+      platform: 'ClearSettle Fintech Platform',
+      version: '1.1.0',
+      cryptographicChainValid: verification.isValid,
+      totalAuditedBlocks: verification.totalEvents,
+    },
+    workspace,
+    clients,
+    invoices,
     reconciliations,
     auditTrail: audit,
   });

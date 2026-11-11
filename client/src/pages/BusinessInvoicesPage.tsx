@@ -10,9 +10,21 @@ import {
   ShieldCheck,
   AlertCircle,
   Building,
+  ChevronDown,
+  ChevronUp,
+  GitCompare,
 } from 'lucide-react';
-import { fetchInvoices, createInvoice, parseInvoiceText, createPayPalOrder, capturePayPalOrder } from '../api/client';
-import { Invoice } from '../types';
+import {
+  fetchInvoices,
+  createInvoice,
+  parseInvoiceText,
+  createPayPalOrder,
+  capturePayPalOrder,
+  fetchWorkspaceReconciliations,
+} from '../api/client';
+import { Invoice, ReconciliationRecord } from '../types';
+import { PaymentEvidenceTimeline } from '../components/PaymentEvidenceTimeline';
+import { ProvenanceBadge } from './ReconciliationPage';
 
 interface BusinessInvoicesPageProps {
   workspaceId: string;
@@ -24,6 +36,8 @@ export const BusinessInvoicesPage: React.FC<BusinessInvoicesPageProps> = ({
   onNavigateToReconciliation,
 }) => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [reconciliations, setReconciliations] = useState<ReconciliationRecord[]>([]);
+  const [expandedReconId, setExpandedReconId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
@@ -49,10 +63,14 @@ export const BusinessInvoicesPage: React.FC<BusinessInvoicesPageProps> = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      const data = await fetchInvoices(workspaceId);
-      setInvoices(data);
+      const [invoiceData, reconData] = await Promise.all([
+        fetchInvoices(workspaceId),
+        fetchWorkspaceReconciliations(workspaceId).catch(() => []),
+      ]);
+      setInvoices(invoiceData);
+      setReconciliations(reconData);
     } catch (err) {
-      console.error('Failed to load invoices:', err);
+      console.error('Failed to load workspace data:', err);
     } finally {
       setLoading(false);
     }
@@ -313,6 +331,96 @@ export const BusinessInvoicesPage: React.FC<BusinessInvoicesPageProps> = ({
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* Reconciled Payments & Fee Audit Section */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <GitCompare className="w-4 h-4 text-indigo-600" />
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Workspace Payment Reconciliation & Fee Deductions</h2>
+              <p className="text-xs text-slate-500">
+                Authoritative breakdown between client obligation, PayPal merchant capture, provider fee deductions, and net proceeds credited.
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+            {reconciliations.length} Reconciled
+          </span>
+        </div>
+
+        {reconciliations.length === 0 ? (
+          <div className="p-8 text-center text-xs text-slate-400">
+            No completed payments reconciled for this workspace yet. Execute a payment above to see the full audit trace.
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {reconciliations.map((rec) => {
+              const isExpanded = expandedReconId === rec.id;
+              const provenance = (rec.capture_provenance || 'PAYPAL-CAPTURE') as any;
+
+              return (
+                <div key={rec.id} className="p-4 space-y-4 hover:bg-slate-50/40 transition-colors">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center shrink-0 mt-0.5">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-900 font-mono">
+                            {(rec as any).invoice_number || `INV-${rec.transfer_id.slice(-6).toUpperCase()}`}
+                          </span>
+                          <span className="text-xs text-slate-600">
+                            {(rec as any).client_name ? `Client: ${(rec as any).client_name}` : ''}
+                          </span>
+                          <ProvenanceBadge type={provenance} />
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">{rec.explanation}</p>
+                      </div>
+                    </div>
+
+                    {/* Financial Summary Pill */}
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right text-xs">
+                        <div className="text-slate-500 text-[10px]">Gross: <span className="font-mono font-bold text-slate-800">{rec.capture_gross_amount} {rec.capture_gross_currency}</span></div>
+                        <div className="text-rose-600 text-[10px]">Fee: <span className="font-mono font-bold">-{rec.capture_fee_amount} {rec.capture_fee_currency}</span></div>
+                        <div className="text-emerald-700 font-bold text-xs">Net: <span className="font-mono">{rec.capture_net_amount} {rec.capture_net_currency}</span></div>
+                      </div>
+
+                      <button
+                        onClick={() => setExpandedReconId(isExpanded ? null : rec.id)}
+                        className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors"
+                        title={isExpanded ? 'Collapse Timeline' : 'Expand Payment Timeline'}
+                      >
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Plain Language Decision Trace */}
+                  {rec.decisionTrace && (
+                    <div className="bg-slate-900 text-white rounded-lg p-3 text-xs space-y-1">
+                      <div className="flex items-center gap-1.5 text-amber-300 font-semibold text-[11px]">
+                        <Sparkles className="w-3 h-3" />
+                        <span>Reconciliation Decision Trace</span>
+                      </div>
+                      <p className="text-slate-300 text-[11px]">{rec.decisionTrace.summary}</p>
+                    </div>
+                  )}
+
+                  {/* Expandable Payment Evidence Timeline */}
+                  {isExpanded && (
+                    <div className="pt-2 border-t border-slate-100">
+                      <PaymentEvidenceTimeline reconciliation={rec} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
