@@ -1,0 +1,227 @@
+[
+  {
+    "id": "dev-01",
+    "split": "dev",
+    "text": "Alex: I paid €450 for the conference hotel booking.",
+    "expectedClass": "CONFIRMED_EXPENSE",
+    "notes": "Direct past-tense payment with amount and description"
+  },
+  {
+    "id": "dev-02",
+    "split": "dev",
+    "text": "John: I covered the group dinner bill of ¥25268 in Shinjuku.",
+    "expectedClass": "CONFIRMED_EXPENSE",
+    "notes": "Foreign currency JPY confirmed expense"
+  },
+  {
+    "id": "dev-03",
+    "split": "dev",
+    "text": "Sam: Bought 3 airport express passes for $162.75.",
+    "expectedClass": "CONFIRMED_EXPENSE",
+    "notes": "USD confirmed transit expense"
+  },
+  {
+    "id": "dev-04",
+    "split": "dev",
+    "text": "Maria: I paid £85 for museum entry tickets.",
+    "expectedClass": "CONFIRMED_EXPENSE",
+    "notes": "GBP confirmed expense"
+  },
+  {
+    "id": "dev-05",
+    "split": "dev",
+    "text": "David: Settled the rental car bill of €220 today.",
+    "expectedClass": "CONFIRMED_EXPENSE",
+    "notes": "Settled past expense"
+  },
+  {
+    "id": "dev-06",
+    "split": "dev",
+    "text": "Lisa: I paid €45 for our shared groceries.",
+    "expectedClass": "CONFIRMED_EXPENSE",
+    "notes": "Simple past expense"
+  },
+  {
+    "id": "dev-07",
+    "split": "dev",
+    "text": "John: I already transferred €100 yesterday to Alex.",
+    "expectedClass": "REPAYMENT",
+    "notes": "Direct completed reimbursement"
+  },
+  {
+    "id": "dev-08",
+    "split": "dev",
+    "text": "Sam: Just sent you $50 via wire to pay you back for lunch.",
+    "expectedClass": "REPAYMENT",
+    "notes": "Reimbursement payment already sent"
+  },
+  {
+    "id": "dev-09",
+    "split": "dev",
+    "text": "Elena: I repaid the €75 I owed from the ski trip.",
+    "expectedClass": "REPAYMENT",
+    "notes": "Explicit debt repayment"
+  },
+  {
+    "id": "dev-10",
+    "split": "dev",
+    "text": "Ken: Wired ¥15000 to cover my share of accommodation.",
+    "expectedClass": "REPAYMENT",
+    "notes": "JPY wire transfer repayment"
+  },
+  {
+    "id": "dev-11",
+    "split": "dev",
+    "text": "Sam: I'll send you €150 tonight once I get to the laptop.",
+    "expectedClass": "PAYMENT_PROMISE",
+    "notes": "Future commitment to pay"
+  },
+  {
+    "id": "dev-12",
+    "split": "dev",
+    "text": "John: I will transfer the remaining $80 by Friday.",
+    "expectedClass": "PAYMENT_PROMISE",
+    "notes": "Promise to transfer in future"
+  },
+  {
+    "id": "dev-13",
+    "split": "dev",
+    "text": "Alex: I'll wire my €200 share tomorrow morning.",
+    "expectedClass": "PAYMENT_PROMISE",
+    "notes": "Future wire commitment"
+  },
+  {
+    "id": "dev-14",
+    "split": "dev",
+    "text": "Chloe: Going to pay you back the £40 this weekend.",
+    "expectedClass": "PAYMENT_PROMISE",
+    "notes": "Intention to pay"
+  },
+  {
+    "id": "dev-15",
+    "split": "dev",
+    "text": "Carlos: We should book the private boat tour for €300.",
+    "expectedClass": "PROPOSED_EXPENSE",
+    "notes": "Hypothetical future activity"
+  },
+  {
+    "id": "dev-16",
+    "split": "dev",
+    "text": "Emma: How about we rent bicycles tomorrow for €40 each?",
+    "expectedClass": "PROPOSED_EXPENSE",
+    "notes": "Suggestion for future expense"
+  },
+  {
+    "id": "dev-17",
+    "split": "dev",
+    "text": "Liam: What if we get the premium conference pass for $500?",
+    "expectedClass": "PROPOSED_EXPENSE",
+    "notes": "Proposed purchase"
+  },
+  {
+    "id": "dev-18",
+    "split": "dev",
+    "text": "Sophie: Let's buy the group train pass for €180.",
+    "expectedClass": "PROPOSED_EXPENSE",
+    "notes": "Proposal to buy"
+  },
+  {
+    "id": "dev-19",
+    "split": "dev",
+    "text": "Sam: Wait, John was supposed to cover dinner, why are you charging €75?",
+    "expectedClass": "UNRESOLVED",
+    "notes": "Contested payer responsibility"
+  },
+  {
+    "id": "dev-20",
+    "split": "dev",
+    "text": "Alex: Did anyone actually pay for the €35 taxi? I thought Maria paid.",
+    "expectedClass": "UNRESOLVED",
+    "notes": "Ambiguous/uncertain payer"
+  },
+  {
+    "id": "dev-21",
+    "split": "dev",
+    "text": "John: That hotel invoice of €450 is incorrect, they overcharged us by €50.",
+    "expectedClass": "UNRESOLVED",
+    "notes": "Disputed invoice amount"
+  },
+  {
+    "id": "dev-22",
+    "split": "dev",
+    "text": "Maria: I disagree with splitting the bar bill equally since I didn't drink.",
+    "expectedClass": "UNRESOLVED",
+    "notes": "Disputed split arrangement"
+  },
+
+  {
+    "id": "test-01",
+    "split": "test",
+    "text": "Lucas: Swiped my card for €130 at the supermarket for BBQ food.",
+    "expectedClass": "CONFIRMED_EXPENSE",
+    "notes": "Held-out: Swiped card past tense expense"
+  },
+  {
+    "id": "test-02",
+    "split": "test",
+    "text": "Nina: Paid 12000 JPY for the luggage forwarding service.",
+    "expectedClass": "CONFIRMED_EXPENSE",
+    "notes": "Held-out: Confirmed JPY service"
+  },
+  {
+    "id": "test-03",
+    "split": "test",
+    "text": "Oliver: Transferred the €65 reimbursement for the fuel.",
+    "expectedClass": "REPAYMENT",
+    "notes": "Held-out: Adversarial (mentions fuel but is a reimbursement)"
+  },
+  {
+    "id": "test-04",
+    "split": "test",
+    "text": "Maya: I have already sent the $110 to settle my part of the Airbnb.",
+    "expectedClass": "REPAYMENT",
+    "notes": "Held-out: Completed settlement"
+  },
+  {
+    "id": "test-05",
+    "split": "test",
+    "text": "Leo: I will reimburse you the €85 for groceries tomorrow.",
+    "expectedClass": "PAYMENT_PROMISE",
+    "notes": "Held-out: Adversarial (mentions groceries but future reimburse)"
+  },
+  {
+    "id": "test-06",
+    "split": "test",
+    "text": "Zoe: Promise to transfer the £50 as soon as my paycheck arrives.",
+    "expectedClass": "PAYMENT_PROMISE",
+    "notes": "Held-out: Explicit promise"
+  },
+  {
+    "id": "test-07",
+    "split": "test",
+    "text": "Ben: Could we reserve the VIP lounge for €150?",
+    "expectedClass": "PROPOSED_EXPENSE",
+    "notes": "Held-out: Could we reserve question"
+  },
+  {
+    "id": "test-08",
+    "split": "test",
+    "text": "Aria: Maybe we should upgrade our flight seats for $90 each?",
+    "expectedClass": "PROPOSED_EXPENSE",
+    "notes": "Held-out: Tentative proposal"
+  },
+  {
+    "id": "test-09",
+    "split": "test",
+    "text": "Tom: No wait, you said the museum was free, why are you asking for €25?",
+    "expectedClass": "UNRESOLVED",
+    "notes": "Held-out: Disputing cost legitimacy"
+  },
+  {
+    "id": "test-10",
+    "split": "test",
+    "text": "Hannah: I'm not sure who paid the $40 parking fee, did anyone get a receipt?",
+    "expectedClass": "UNRESOLVED",
+    "notes": "Held-out: Unverified payer and missing proof"
+  }
+]

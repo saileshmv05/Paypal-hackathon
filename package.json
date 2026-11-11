@@ -1,0 +1,38 @@
+{
+  "name": "clearsettle",
+  "version": "1.0.0",
+  "description": "ClearSettle — AI-Assisted Group Expense Reconciliation Platform",
+  "main": "server/index.ts",
+  "scripts": {
+    "server": "tsx server/index.ts",
+    "client": "npm run dev --prefix client",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"blue,green\" \"npm run server\" \"npm run client\"",
+    "build": "npm run build --prefix client && tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "seed": "tsx server/seed.ts",
+    "eval:ai": "tsx scripts/eval-ai.ts",
+    "probe:quote": "tsx scripts/probe-quote.ts",
+    "evidence": "tsx scripts/evidence-harness.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.5",
+    "decimal.js": "^10.6.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^9.2.1",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
