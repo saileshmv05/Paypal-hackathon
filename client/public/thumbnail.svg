@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#080c14" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+    <linearGradient id="brandGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="50%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="rgba(30, 41, 59, 0.7)" />
+      <stop offset="100%" stop-color="rgba(15, 23, 42, 0.85)" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="24" flood-color="#000" flood-opacity="0.6"/>
+    </filter>
+    <filter id="neon" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255, 255, 255, 0.03)" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="1200" height="630" fill="url(#bg)" />
+  <rect width="1200" height="630" fill="url(#grid)" />
+
+  <!-- Ambient Light Orbs -->
+  <circle cx="200" cy="150" r="280" fill="#6366f1" opacity="0.12" filter="url(#neon)" />
+  <circle cx="1000" cy="480" r="320" fill="#10b981" opacity="0.10" filter="url(#neon)" />
+
+  <!-- Central Card -->
+  <g filter="url(#shadow)">
+    <rect x="120" y="80" width="960" height="470" rx="28" fill="url(#cardBg)" stroke="rgba(255, 255, 255, 0.1)" stroke-width="1.5" />
+  </g>
+
+  <!-- cs.ai Monogram Icon Box -->
+  <g transform="translate(180, 140)">
+    <rect width="90" height="90" rx="24" fill="#0f172a" stroke="rgba(255, 255, 255, 0.15)" stroke-width="2" />
+    <text x="18" y="58" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif" font-size="36" font-weight="900" fill="#ffffff" letter-spacing="-2">cs</text>
+    <text x="50" y="58" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif" font-size="26" font-weight="800" fill="url(#brandGlow)">.ai</text>
+    <circle cx="76" cy="28" r="4.5" fill="#10b981" filter="url(#neon)" />
+  </g>
+
+  <!-- Tagline Badge -->
+  <g transform="translate(290, 150)">
+    <rect width="180" height="30" rx="15" fill="rgba(16, 185, 129, 0.12)" stroke="rgba(16, 185, 129, 0.3)" stroke-width="1" />
+    <text x="14" y="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#34d399" letter-spacing="1.2">FINTECH AI ENGINE</text>
+  </g>
+
+  <!-- Main Headline -->
+  <text x="290" y="215" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif" font-size="44" font-weight="800" fill="#ffffff" letter-spacing="-1">
+    cs.ai <tspan fill="#94a3b8" font-weight="400">| ClearSettle</tspan>
+  </text>
+
+  <!-- Subheadline -->
+  <text x="180" y="290" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="500" fill="#cbd5e1">
+    AI Obligation Management & PayPal Payment Reconciliation Platform
+  </text>
+
+  <!-- Description -->
+  <text x="180" y="325" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="400" fill="#94a3b8">
+    Connecting agreed debts, ledger math, PayPal capture status, and net receivable proceeds.
+  </text>
+
+  <!-- Feature Pills Footer -->
+  <g transform="translate(180, 395)">
+    <!-- Pill 1: PayPal Orders v2 -->
+    <rect x="0" y="0" width="220" height="48" rx="14" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(255, 255, 255, 0.1)" stroke-width="1" />
+    <circle cx="24" cy="24" r="5" fill="#38bdf8" />
+    <text x="40" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#f8fafc">PayPal Orders v2</text>
+
+    <!-- Pill 2: Multicurrency Ledger -->
+    <rect x="236" y="0" width="220" height="48" rx="14" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(255, 255, 255, 0.1)" stroke-width="1" />
+    <circle cx="260" cy="24" r="5" fill="#10b981" />
+    <text x="276" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#f8fafc">Multi-Currency Core</text>
+
+    <!-- Pill 3: Cryptographic Audit -->
+    <rect x="472" y="0" width="220" height="48" rx="14" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(255, 255, 255, 0.1)" stroke-width="1" />
+    <circle cx="496" cy="24" r="5" fill="#a855f7" />
+    <text x="512" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#f8fafc">SHA-256 Audit Chain</text>
+
+    <!-- Pill 4: Google OAuth 2.0 -->
+    <rect x="708" y="0" width="132" height="48" rx="14" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(255, 255, 255, 0.1)" stroke-width="1" />
+    <circle cx="732" cy="24" r="5" fill="#f59e0b" />
+    <text x="748" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#f8fafc">OAuth 2.0</text>
+  </g>
+
+  <!-- Watermark Bottom Right -->
+  <text x="1040" y="525" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="600" fill="#64748b" letter-spacing="0.5">
+    PAYPAL HACKATHON 2026
+  </text>
+</svg>

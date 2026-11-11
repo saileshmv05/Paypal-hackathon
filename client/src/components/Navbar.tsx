@@ -160,19 +160,25 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Main Header Bar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Brand Identity */}
+          {/* Brand Identity: cs.ai */}
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('welcome')}>
-            <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-sm ring-1 ring-slate-800">
-              <span className="font-bold text-lg tracking-tight">CS</span>
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-900 to-indigo-950 flex items-center justify-center text-white shadow-md ring-1 ring-slate-800/80 group">
+              <span className="font-black text-sm tracking-tight flex items-center">
+                cs<span className="text-emerald-400 font-bold">.ai</span>
+              </span>
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-900 text-base tracking-tight">ClearSettle</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-black text-slate-900 text-base tracking-tight flex items-center">
+                  cs<span className="text-emerald-600 font-extrabold">.ai</span>
+                </span>
+                <span className="text-xs text-slate-300 font-light">|</span>
+                <span className="text-xs font-semibold text-slate-700">ClearSettle</span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                   Fintech Core
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-medium">Payment Obligation & Reconciliation</p>
+              <p className="text-[11px] text-slate-500 font-medium">Obligation Ledger & Payment Reconciliation</p>
             </div>
           </div>
 

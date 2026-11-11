@@ -36,7 +36,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onExplore, onOpenAuth 
       <div className="bg-white rounded-3xl border border-slate-200/90 p-8 sm:p-14 shadow-xs relative overflow-hidden">
         <div className="max-w-3xl space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-800">
-            <Coins className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="font-black text-slate-900 tracking-tight flex items-center">
+              cs<span className="text-emerald-600">.ai</span>
+            </span>
+            <span className="text-slate-300 font-light">|</span>
             <span>Fintech Financial Obligation & Payment Reconciliation Engine</span>
           </div>
 
