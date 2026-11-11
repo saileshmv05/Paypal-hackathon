@@ -149,6 +149,18 @@ export const ReviewQueuePage: React.FC<ReviewQueuePageProps> = ({
                       {item.classification.replace('_', ' ')}
                     </span>
 
+                    {(item.is_correction || item.isCorrection) && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
+                        ✏️ CORRECTION
+                      </span>
+                    )}
+
+                    {(item.is_duplicate || item.isDuplicate) && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-100 text-rose-900 border border-rose-300">
+                        ⚠️ POTENTIAL DUPLICATE
+                      </span>
+                    )}
+
                     <span className="text-xs font-bold text-slate-900">{item.description}</span>
                   </div>
 

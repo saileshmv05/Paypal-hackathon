@@ -10,6 +10,7 @@ import { SettlementPage } from './pages/SettlementPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
 import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { BusinessInvoicesPage } from './pages/BusinessInvoicesPage';
 import {
   fetchConfig,
   fetchGroups,
@@ -36,6 +37,7 @@ import {
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('welcome');
+  const [workspaceType, setWorkspaceType] = useState<'PERSONAL' | 'BUSINESS'>('PERSONAL');
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('group-intl-trip-2026');
   const [groupDetails, setGroupDetails] = useState<Group | null>(null);
@@ -56,6 +58,23 @@ export function App() {
   const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
   const [activeCheckoutTransfer, setActiveCheckoutTransfer] = useState<SettlementTransfer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [paypalNotification, setPaypalNotification] = useState<string | null>(null);
+
+  // Check URL params for PayPal Return
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('paypalReturn') === 'true') {
+      const token = params.get('token');
+      setPaypalNotification(
+        `PayPal Sandbox Checkout Approved by Buyer (Order Token: ${token || 'Verified'}). Transaction ready for capture & audit.`
+      );
+      setActiveTab('reconciliation');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (params.get('paypalCancel') === 'true') {
+      setPaypalNotification('PayPal checkout session was cancelled by buyer.');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   // Load all data
   const loadGroupData = async (groupId: string) => {
@@ -136,8 +155,34 @@ export function App() {
         selectedGroupId={selectedGroupId}
         setSelectedGroupId={setSelectedGroupId}
         pendingReviewsCount={pendingCount}
+        workspaceType={workspaceType}
+        setWorkspaceType={(type) => {
+          setWorkspaceType(type);
+          if (type === 'BUSINESS') {
+            setActiveTab('invoices');
+          } else if (activeTab === 'invoices') {
+            setActiveTab('dashboard');
+          }
+        }}
         onResetDemo={handleResetDemo}
       />
+
+      {paypalNotification && (
+        <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-3 sm:px-6">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-sm text-emerald-800">
+              <span className="font-semibold">PayPal Notice:</span>
+              <span>{paypalNotification}</span>
+            </div>
+            <button
+              onClick={() => setPaypalNotification(null)}
+              className="text-emerald-600 hover:text-emerald-800 text-xs font-medium"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {loading ? (
@@ -147,6 +192,13 @@ export function App() {
         ) : (
           <>
             {activeTab === 'welcome' && <LandingPage onExplore={(tab) => setActiveTab(tab)} />}
+
+            {activeTab === 'invoices' && (
+              <BusinessInvoicesPage
+                workspaceId="workspace-agency-demo"
+                onNavigateToReconciliation={() => setActiveTab('reconciliation')}
+              />
+            )}
 
             {activeTab === 'dashboard' && (
               <DashboardPage

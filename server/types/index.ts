@@ -157,6 +157,16 @@ export interface CaptureResult {
   createdAt: string;
 }
 
+export type ReconciliationMatchStatus =
+  | 'MATCHED'
+  | 'PARTIALLY_MATCHED'
+  | 'OVERPAID'
+  | 'UNDERPAID'
+  | 'FAILED'
+  | 'PENDING'
+  | 'UNMATCHED'
+  | 'REQUIRES_REVIEW';
+
 export type ProvenanceBadge = 'LEDGER' | 'ESTIMATE' | 'QUOTE' | 'PAYPAL-CAPTURE' | 'SIMULATED';
 
 export interface ReconciliationRecord {
@@ -165,6 +175,7 @@ export interface ReconciliationRecord {
   transactionId: string;
   provider: ProviderType;
   status: ReconciliationStatus;
+  matchStatus?: ReconciliationMatchStatus;
   captureProvenance: 'PAYPAL-CAPTURE' | 'SIMULATED';
   
   // 1. Group Ledger Value
@@ -203,6 +214,14 @@ export interface ReconciliationRecord {
   observedProviderFee: string | null;
   unobservableChargesEstimate: string | null;
   explanation: string;
+  decisionTrace?: {
+    expectedAmount: string;
+    capturedGross: string;
+    providerFee: string;
+    netReceived: string;
+    variance: string;
+    summary: string;
+  };
   createdAt: string;
 }
 
@@ -221,6 +240,10 @@ export interface AIExtractionItem {
   splitType: SplitType;
   missingInformation: string[];
   explanation: string;
+  isCorrection?: boolean;
+  correctionTargetId?: string;
+  isDuplicate?: boolean;
+  duplicateOfId?: string;
   status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
 }
 
@@ -233,5 +256,63 @@ export interface AuditEvent {
   actor: string;
   description: string;
   metadata: Record<string, any>;
+  prevHash: string;
+  hash: string;
   createdAt: string;
+}
+
+// ----------------------------------------------------------------------
+// WORKSPACE & SMALL BUSINESS DOMAIN TYPES
+// ----------------------------------------------------------------------
+export type WorkspaceType = 'PERSONAL' | 'BUSINESS';
+
+export interface Workspace {
+  id: string;
+  name: string;
+  type: WorkspaceType;
+  baseCurrency: CurrencyCode;
+  ownerName: string;
+  description?: string;
+  createdAt: string;
+}
+
+export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PAID' | 'PARTIALLY_PAID' | 'OVERDUE' | 'CANCELLED';
+
+export interface Invoice {
+  id: string;
+  workspaceId: string;
+  invoiceNumber: string;
+  clientName: string;
+  clientEmail: string;
+  description: string;
+  amount: string; // Exact Decimal string
+  currency: CurrencyCode;
+  baseAmount: string; // Converted base amount
+  issueDate: string;
+  dueDate: string;
+  status: InvoiceStatus;
+  paidAmount: string;
+  paypalOrderId?: string;
+  reconciliationId?: string;
+  createdAt: string;
+}
+
+export interface Client {
+  id: string;
+  workspaceId: string;
+  name: string;
+  email: string;
+  company?: string;
+  country: string;
+  preferredCurrency: CurrencyCode;
+  createdAt: string;
+}
+
+export interface UserContext {
+  id: string;
+  name: string;
+  email: string;
+  role: 'ADMIN' | 'MEMBER' | 'OWNER';
+  groupIds: string[];
+  workspaceIds: string[];
 }

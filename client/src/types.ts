@@ -108,12 +108,23 @@ export interface SettlementPlan {
   transfers: SettlementTransfer[];
 }
 
+export type ReconciliationMatchStatus =
+  | 'MATCHED'
+  | 'PARTIALLY_MATCHED'
+  | 'OVERPAID'
+  | 'UNDERPAID'
+  | 'FAILED'
+  | 'PENDING'
+  | 'UNMATCHED'
+  | 'REQUIRES_REVIEW';
+
 export interface ReconciliationRecord {
   id: string;
   transfer_id: string;
   transaction_id: string;
   provider: string;
   status: string;
+  match_status?: ReconciliationMatchStatus;
   capture_provenance?: 'PAYPAL-CAPTURE' | 'SIMULATED';
   from_member_name?: string;
   to_member_name?: string;
@@ -154,6 +165,14 @@ export interface ReconciliationRecord {
   observed_provider_fee: string | null;
   unobservable_charges_estimate: string | null;
   explanation: string;
+  decisionTrace?: {
+    expectedAmount: string;
+    capturedGross: string;
+    providerFee: string;
+    netReceived: string;
+    variance: string;
+    summary: string;
+  };
   created_at: string;
 }
 
@@ -180,6 +199,11 @@ export interface AIExtractionItem {
   missing_information?: string[];
   missingInformation?: string[];
   explanation: string;
+  is_correction?: boolean;
+  isCorrection?: boolean;
+  is_duplicate?: boolean;
+  isDuplicate?: boolean;
+  duplicate_of_id?: string;
   status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
 }
 
@@ -192,6 +216,55 @@ export interface AuditEvent {
   actor: string;
   description: string;
   metadata?: string;
+  prev_hash?: string;
+  hash?: string;
+  created_at: string;
+}
+
+// ----------------------------------------------------------------------
+// WORKSPACE & SMALL BUSINESS DOMAIN TYPES
+// ----------------------------------------------------------------------
+export type WorkspaceType = 'PERSONAL' | 'BUSINESS';
+
+export interface Workspace {
+  id: string;
+  name: string;
+  type: WorkspaceType;
+  base_currency: CurrencyCode;
+  owner_name: string;
+  description?: string;
+  created_at: string;
+}
+
+export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PAID' | 'PARTIALLY_PAID' | 'OVERDUE' | 'CANCELLED';
+
+export interface Invoice {
+  id: string;
+  workspace_id: string;
+  invoice_number: string;
+  client_name: string;
+  client_email: string;
+  description: string;
+  amount: string;
+  currency: CurrencyCode;
+  base_amount: string;
+  issue_date: string;
+  due_date: string;
+  status: InvoiceStatus;
+  paid_amount: string;
+  paypal_order_id?: string;
+  reconciliation_id?: string;
+  created_at: string;
+}
+
+export interface Client {
+  id: string;
+  workspace_id: string;
+  name: string;
+  email: string;
+  company?: string;
+  country: string;
+  preferred_currency: CurrencyCode;
   created_at: string;
 }
 

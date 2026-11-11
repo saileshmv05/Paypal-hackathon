@@ -9,6 +9,7 @@ client/dist/
 
 # Local databases and logs
 *.db
+*.db.backup
 *.db-journal
 *.db-wal
 *.db-shm

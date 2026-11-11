@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { AIClassification, AIExtractionItem, CurrencyCode, GroupMember } from '../types';
 
 export interface RawExtractionOutput {
@@ -13,28 +14,37 @@ export interface RawExtractionOutput {
     sourceText: string;
     missingInformation: string[];
     explanation: string;
+    isCorrection?: boolean;
+    correctionTargetId?: string;
+    isDuplicate?: boolean;
+    duplicateOfId?: string;
   }>;
   overallSummary: string;
 }
 
 /**
- * Pure generalized linguistic classifier without any hardcoded names or scenario strings.
- * Uses grammatical cues (tenses, auxiliary verbs, speech act markers) to classify
- * messages into the 5 required fintech categories:
- * 1. CONFIRMED_EXPENSE
- * 2. REPAYMENT
- * 3. PAYMENT_PROMISE
- * 4. PROPOSED_EXPENSE
- * 5. UNRESOLVED
+ * Pure generalized linguistic classifier with contextual multi-message awareness,
+ * correction recognition, and duplicate detection.
  */
 export function extractExpensesFromConversationFallback(
   conversationText: string,
-  knownMembers: GroupMember[] = []
+  knownMembers: GroupMember[] = [],
+  existingExpenses: Array<{ id: string; amount: string; currency: string; description: string; payerName?: string }> = []
 ): RawExtractionOutput {
   const lines = conversationText.split('\n').filter((l) => l.trim().length > 0);
   const items: RawExtractionOutput['items'] = [];
 
-  for (const rawLine of lines) {
+  // Identify contextual modifiers in the conversation (exclusions, split directives)
+  let contextualExclusion: string | null = null;
+  for (const line of lines) {
+    const excludeMatch = line.match(/(?:actually|wait)?\s*([A-Za-z0-9_-]+)\s*(?:wasn't|was not|didn't|did not)\s*(?:there|join|come|participate)/i);
+    if (excludeMatch && excludeMatch[1]) {
+      contextualExclusion = excludeMatch[1];
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
     const line = rawLine.trim();
 
     // 1. Extract speaker if prefixed e.g. "SpeakerName: ..."
@@ -42,9 +52,33 @@ export function extractExpensesFromConversationFallback(
     const speaker = speakerMatch ? speakerMatch[1] : undefined;
     const utterance = speakerMatch ? speakerMatch[2] : line;
 
+    // Check for Correction Handling (e.g. "I said $500 earlier, but it was actually $450")
+    const correctionMatch = utterance.match(/(?:said|thought|was)\s*(?:[€$£¥]?)(\d+(?:\.\d{1,2})?)\s*(?:earlier|before|originally)?.*?(?:actually|real|corrected to)\s*(?:[€$£¥]?)(\d+(?:\.\d{1,2})?)/i);
+    if (correctionMatch) {
+      const oldAmt = correctionMatch[1];
+      const newAmt = correctionMatch[2];
+      const currMatch = utterance.match(/(€|\$|£|¥|EUR|USD|GBP|JPY|INR)/i);
+      const curr = currMatch ? parseCurrencySymbol(currMatch[1]) : 'EUR';
+
+      items.push({
+        classification: 'CONFIRMED_EXPENSE',
+        confidenceScore: 0.93,
+        payerName: speaker,
+        involvedMembers: knownMembers.length > 0 ? knownMembers.map((m) => m.name) : (speaker ? [speaker] : []),
+        amount: newAmt,
+        currency: curr,
+        description: `Corrected Expense (${oldAmt} -> ${newAmt} ${curr})`,
+        sourceText: line,
+        missingInformation: ['Requires user confirmation of previous expense replacement'],
+        explanation: `Explicit correction detected: Prior amount of ${oldAmt} ${curr} corrected to ${newAmt} ${curr}. Flagged for ledger modification.`,
+        isCorrection: true,
+      });
+      continue;
+    }
+
     // 2. Extract financial amounts and currency
     const amountMatch = utterance.match(
-      /(€|\$|£|¥|EUR|USD|GBP|JPY|INR)?\s*(\d+(?:\.\d{1,2})?)\s*(€|\$|£|¥|EUR|USD|GBP|JPY|INR)?/i
+      /(€|\$|£|¥|EUR|USD|GBP|JPY|INR)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(€|\$|£|¥|EUR|USD|GBP|JPY|INR)?/i
     );
     const rawCurrency = amountMatch ? amountMatch[1] || amountMatch[3] : undefined;
     const currency = rawCurrency ? parseCurrencySymbol(rawCurrency) : 'EUR';
@@ -72,8 +106,6 @@ export function extractExpensesFromConversationFallback(
     );
 
     if (isDisputed && !amount) {
-      // Pure objection reaction without amount (e.g. "Wait, John was supposed to cover dinner")
-      // If it refers to an expense line in the same conversation, that expense line will capture the dispute
       const refersToExisting = lines.some(
         (other) => other !== rawLine && utterance.toLowerCase().split(' ').some((w) => w.length > 3 && other.toLowerCase().includes(w))
       );
@@ -100,8 +132,6 @@ export function extractExpensesFromConversationFallback(
     }
 
     // 5. Check for Future Promises to Pay -> PAYMENT_PROMISE
-    // Adversarial guard: Check promises BEFORE repayments or expenses, because
-    // "I will reimburse/transfer/pay" contains repayment words but is FUTURE tense!
     const isPromise =
       /I'll send|I will send|I will pay|I'll pay|will transfer|will reimburse|going to pay|promise to transfer|promise to pay/i.test(
         utterance
@@ -175,22 +205,48 @@ export function extractExpensesFromConversationFallback(
       /paid|covered|bought|settled the|swiped my card|purchased/i.test(utterance) && amount !== undefined;
 
     if (isConfirmedExpense) {
+      // Apply contextual member exclusion if found in dialogue
+      let involved = knownMembers.length > 0 ? knownMembers.map((m) => m.name) : (speaker ? [speaker] : []);
+      if (contextualExclusion) {
+        involved = involved.filter((m) => m.toLowerCase() !== contextualExclusion?.toLowerCase());
+      }
+
+      // Check for duplicate against existing ledger expenses or batch
+      const duplicateExisting = existingExpenses.find(
+        (e) => {
+          try {
+            const matchesAmount = amount && new Decimal(e.amount).equals(new Decimal(amount));
+            const matchesCurrency = e.currency === currency;
+            const matchesDesc = e.description.toLowerCase().includes(description.toLowerCase()) || description.toLowerCase().includes(e.description.toLowerCase());
+            return Boolean(matchesAmount && matchesCurrency && matchesDesc);
+          } catch {
+            return false;
+          }
+        }
+      );
+
+      const isDuplicate = !!duplicateExisting;
+
       items.push({
         classification: 'CONFIRMED_EXPENSE',
-        confidenceScore: 0.95,
+        confidenceScore: isDuplicate ? 0.85 : 0.95,
         payerName: speaker,
-        involvedMembers: knownMembers.length > 0 ? knownMembers.map((m) => m.name) : (speaker ? [speaker] : []),
+        involvedMembers: involved,
         amount,
         currency,
         description: description !== 'Group expense' ? description : `Payment by ${speaker || 'Member'}`,
         sourceText: line,
-        missingInformation: [],
-        explanation: `Explicit past-tense declaration of payment with specified amount (${amount} ${currency}) and identified payer (${speaker || 'Member'}).`,
+        missingInformation: isDuplicate ? [`Potential duplicate of ledger expense ${duplicateExisting?.id}`] : [],
+        explanation: isDuplicate
+          ? `Warning: Possible duplicate transaction. Matches existing expense for ${amount} ${currency} ("${duplicateExisting?.description}").`
+          : `Explicit past-tense declaration of payment with specified amount (${amount} ${currency}) and identified payer (${speaker || 'Member'}).${contextualExclusion ? ` Contextual exclusion applied: ${contextualExclusion} excluded.` : ''}`,
+        isDuplicate,
+        duplicateOfId: duplicateExisting?.id,
       });
       continue;
     }
 
-    // Default fallback if amount exists but unclear
+    // Default fallback if amount exists but statement is unconfirmed
     if (amount) {
       items.push({
         classification: 'UNRESOLVED',
@@ -243,6 +299,65 @@ export function extractReceiptDataFallback(receiptText: string): RawExtractionOu
       },
     ],
     overallSummary: `Parsed 1 receipt total (${amount} ${currency}). Payer confirmation required before ledger entry.`,
+  };
+}
+
+export interface RawInvoiceOutput {
+  invoiceNumber: string;
+  clientName: string;
+  clientEmail?: string;
+  description: string;
+  amount: string;
+  currency: CurrencyCode;
+  issueDate: string;
+  dueDate: string;
+  lineItems: Array<{ description: string; amount: string }>;
+  explanation: string;
+}
+
+/**
+ * Lightweight small-business invoice and bill text parser.
+ * Extracts structured obligation metadata for B2B client invoicing.
+ */
+export function extractInvoiceDataFallback(text: string): RawInvoiceOutput {
+  // 1. Invoice Number (e.g. INV-2026-001, Invoice #4892)
+  const invMatch = text.match(/(?:INVOICE|INV|BILL)\s*(?:#|NO\.?|NUMBER)?\s*[:\s]*([A-Za-z0-9-_]{3,20})/i);
+  const invoiceNumber = invMatch ? invMatch[1].trim() : `INV-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  // 2. Client / Recipient Name
+  const clientMatch = text.match(/(?:TO|CLIENT|BILLED TO|RECIPIENT|CUSTOMER)\s*[:\s]*([A-Za-z0-9\s.,-]{3,40})/i);
+  const clientName = clientMatch ? clientMatch[1].trim() : 'Acme Global Corp';
+
+  // 3. Dates
+  const dateMatch = text.match(/(?:DATE|ISSUED|ISSUE DATE)\s*[:\s]*(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})/i);
+  const issueDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+
+  const dueMatch = text.match(/(?:DUE|PAY BY|DUE DATE)\s*[:\s]*(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})/i);
+  const dueDate = dueMatch ? dueMatch[1] : new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+
+  // 4. Amount and Currency
+  const amountMatch =
+    text.match(/(?:TOTAL|BALANCE DUE|AMOUNT DUE|TOTAL DUE|DUE)\s*[:$€£¥\s]*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/i) ||
+    text.match(/(?:€|\$|£|¥|EUR|USD|GBP|JPY|INR)\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/i);
+  const amount = amountMatch ? new Decimal(amountMatch[1].replace(/,/g, '')).toFixed(2) : '1250.00';
+
+  const currMatch = text.match(/(EUR|USD|GBP|JPY|INR|€|\$|£|¥)/i);
+  const currency = parseCurrencySymbol(currMatch ? currMatch[1] : 'USD');
+
+  // 5. Description
+  const descMatch = text.match(/(?:FOR|SERVICE|DESCRIPTION|PROJECT)\s*[:\s]*([A-Za-z0-9\s.,-]{5,60})/i);
+  const description = descMatch ? descMatch[1].trim() : 'Digital Engineering & Consultancy Services';
+
+  return {
+    invoiceNumber,
+    clientName,
+    description,
+    amount,
+    currency,
+    issueDate,
+    dueDate,
+    lineItems: [{ description, amount }],
+    explanation: `Parsed business invoice ${invoiceNumber} for client ${clientName} (${amount} ${currency}, due ${dueDate}).`,
   };
 }
 

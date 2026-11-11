@@ -163,11 +163,13 @@ export async function rejectAIItem(groupId: string, itemId: string): Promise<any
 }
 
 export async function createPayPalOrder(data: {
-  transferId: string;
-  amount: string;
-  currency: string;
+  transferId?: string;
+  invoiceId?: string;
+  obligationType?: 'SETTLEMENT' | 'INVOICE';
+  amount?: string;
+  currency?: string;
   description?: string;
-}): Promise<{ providerOrderId: string; approvalUrl?: string; status: string }> {
+}): Promise<{ providerOrderId: string; approvalUrl?: string; status: string; amount?: string; currency?: string }> {
   const res = await fetch(`${API_BASE}/paypal/create-order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -182,8 +184,9 @@ export async function createPayPalOrder(data: {
 
 export async function capturePayPalOrder(data: {
   providerOrderId: string;
-  transferId: string;
-  groupId: string;
+  transferId?: string;
+  invoiceId?: string;
+  groupId?: string;
 }): Promise<any> {
   const res = await fetch(`${API_BASE}/paypal/capture-order`, {
     method: 'POST',
@@ -200,6 +203,50 @@ export async function capturePayPalOrder(data: {
 export async function fetchReconciliations(groupId: string): Promise<ReconciliationRecord[]> {
   const res = await fetch(`${API_BASE}/groups/${groupId}/reconciliations`);
   if (!res.ok) throw new Error('Failed to fetch reconciliations');
+  return res.json();
+}
+
+// ----------------------------------------------------------------------
+// SMALL BUSINESS WORKSPACE & INVOICING API
+// ----------------------------------------------------------------------
+export async function fetchWorkspaces(): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/workspaces`);
+  if (!res.ok) throw new Error('Failed to fetch workspaces');
+  return res.json();
+}
+
+export async function fetchInvoices(workspaceId: string): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invoices`);
+  if (!res.ok) throw new Error('Failed to fetch invoices');
+  return res.json();
+}
+
+export async function createInvoice(workspaceId: string, data: any): Promise<any> {
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invoices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to create invoice');
+  }
+  return res.json();
+}
+
+export async function parseInvoiceText(workspaceId: string, input: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/invoices/parse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input }),
+  });
+  if (!res.ok) throw new Error('Failed to parse invoice text');
+  return res.json();
+}
+
+export async function verifyAuditChain(groupId: string): Promise<{ isValid: boolean; totalEvents: number; verifiedAt: string; errors: string[] }> {
+  const res = await fetch(`${API_BASE}/groups/${groupId}/audit/verify`);
+  if (!res.ok) throw new Error('Failed to verify audit chain');
   return res.json();
 }
 

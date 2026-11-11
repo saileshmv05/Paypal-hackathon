@@ -11,6 +11,8 @@ import {
   Compass,
   RotateCcw,
   Scale,
+  Building,
+  FileText,
 } from 'lucide-react';
 import { Group } from '../types';
 
@@ -21,7 +23,17 @@ interface NavbarProps {
   selectedGroupId: string;
   setSelectedGroupId: (id: string) => void;
   pendingReviewsCount: number;
+  workspaceType: 'PERSONAL' | 'BUSINESS';
+  setWorkspaceType: (type: 'PERSONAL' | 'BUSINESS') => void;
   onResetDemo: () => void;
+}
+
+interface NavItem {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: number | string;
+  highlight?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -31,11 +43,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   selectedGroupId,
   setSelectedGroupId,
   pendingReviewsCount,
+  workspaceType,
+  setWorkspaceType,
   onResetDemo,
 }) => {
   const currentGroup = groups.find((g) => g.id === selectedGroupId) || groups[0];
 
-  const navItems = [
+  const personalNavItems: NavItem[] = [
     { id: 'welcome', label: 'Overview', icon: Compass },
     { id: 'dashboard', label: 'Dashboard', icon: Layers },
     { id: 'group', label: 'Group', icon: Users },
@@ -57,6 +71,17 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'audit', label: 'Audit Trail', icon: History },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
+
+  const businessNavItems: NavItem[] = [
+    { id: 'welcome', label: 'Overview', icon: Compass },
+    { id: 'invoices', label: 'Invoices & Clients', icon: FileText, highlight: true },
+    { id: 'ai-import', label: 'AI OCR Parser', icon: Sparkles },
+    { id: 'reconciliation', label: 'Reconciliation Audit', icon: GitCompare },
+    { id: 'audit', label: 'Cryptographic Audit', icon: History },
+    { id: 'settings', label: 'Settings', icon: Settings },
+  ];
+
+  const navItems = workspaceType === 'BUSINESS' ? businessNavItems : personalNavItems;
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
@@ -101,22 +126,63 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Group Selector & Base Currency Badge */}
+          {/* Segment Selector & Workspace Controls */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs">
-              <span className="text-slate-500 font-medium">Group:</span>
-              <select
-                value={selectedGroupId}
-                onChange={(e) => setSelectedGroupId(e.target.value)}
-                className="bg-transparent font-medium text-slate-800 focus:outline-none cursor-pointer"
+            {/* Customer Segment Toggle Pill */}
+            <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200 text-xs font-semibold">
+              <button
+                onClick={() => {
+                  setWorkspaceType('PERSONAL');
+                  if (activeTab === 'invoices') setActiveTab('dashboard');
+                }}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
+                  workspaceType === 'PERSONAL'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
               >
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
+                <Users className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Personal Travel</span>
+              </button>
+              <button
+                onClick={() => {
+                  setWorkspaceType('BUSINESS');
+                  if (activeTab === 'dashboard' || activeTab === 'group' || activeTab === 'ledger' || activeTab === 'optimizer') {
+                    setActiveTab('invoices');
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
+                  workspaceType === 'BUSINESS'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Building className="w-3.5 h-3.5 text-amber-600" />
+                <span>Small Business</span>
+              </button>
             </div>
+
+            {workspaceType === 'PERSONAL' ? (
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs">
+                <span className="text-slate-500 font-medium">Group:</span>
+                <select
+                  value={selectedGroupId}
+                  onChange={(e) => setSelectedGroupId(e.target.value)}
+                  className="bg-transparent font-medium text-slate-800 focus:outline-none cursor-pointer"
+                >
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs">
+                <span className="text-slate-500 font-medium">Agency:</span>
+                <span className="font-semibold text-slate-800">Apex Creative Studios</span>
+              </div>
+            )}
 
             <div className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-xs font-mono text-slate-700">
               <span className="text-slate-400">Base:</span>
@@ -163,3 +229,4 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
+

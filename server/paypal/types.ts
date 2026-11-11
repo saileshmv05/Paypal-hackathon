@@ -25,6 +25,8 @@ export interface CreateOrderRequest {
   currency: CurrencyCode;
   description: string;
   customId?: string;
+  returnUrl?: string;
+  cancelUrl?: string;
 }
 
 export interface CreateOrderResponse {

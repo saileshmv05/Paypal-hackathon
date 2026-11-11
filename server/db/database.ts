@@ -145,6 +145,8 @@ export function initDatabase() {
       actor TEXT NOT NULL,
       description TEXT NOT NULL,
       metadata TEXT,
+      prev_hash TEXT NOT NULL DEFAULT '',
+      hash TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL
     );
 
@@ -164,8 +166,55 @@ export function initDatabase() {
       split_type TEXT NOT NULL DEFAULT 'EQUAL',
       missing_information TEXT,
       explanation TEXT NOT NULL,
+      is_correction INTEGER NOT NULL DEFAULT 0,
+      correction_target_id TEXT,
+      is_duplicate INTEGER NOT NULL DEFAULT 0,
+      duplicate_of_id TEXT,
       status TEXT NOT NULL DEFAULT 'PENDING_REVIEW',
       created_at TEXT NOT NULL
+    );
+
+    -- Small Business Workspace & Invoicing Tables
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'PERSONAL',
+      base_currency TEXT NOT NULL DEFAULT 'EUR',
+      owner_name TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS invoices (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      invoice_number TEXT NOT NULL,
+      client_name TEXT NOT NULL,
+      client_email TEXT NOT NULL,
+      description TEXT NOT NULL,
+      amount TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      base_amount TEXT NOT NULL,
+      issue_date TEXT NOT NULL,
+      due_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ISSUED',
+      paid_amount TEXT NOT NULL DEFAULT '0.00',
+      paypal_order_id TEXT,
+      reconciliation_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS clients (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      company TEXT,
+      country TEXT NOT NULL,
+      preferred_currency TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
   `;
 
@@ -173,10 +222,37 @@ export function initDatabase() {
 
   // Column migrations for existing databases
   try {
-    const tableInfo = db.prepare("PRAGMA table_info('reconciliations')").all() as any[];
-    const hasProvenance = tableInfo.some((col: any) => col.name === 'capture_provenance');
-    if (!hasProvenance) {
+    const reconCols = (db.prepare("PRAGMA table_info('reconciliations')").all() as any[]).map((c) => c.name);
+    if (!reconCols.includes('capture_provenance')) {
       db.prepare("ALTER TABLE reconciliations ADD COLUMN capture_provenance TEXT NOT NULL DEFAULT 'SIMULATED'").run();
+    }
+    if (!reconCols.includes('match_status')) {
+      db.prepare("ALTER TABLE reconciliations ADD COLUMN match_status TEXT NOT NULL DEFAULT 'MATCHED'").run();
+    }
+    if (!reconCols.includes('decision_trace')) {
+      db.prepare("ALTER TABLE reconciliations ADD COLUMN decision_trace TEXT").run();
+    }
+
+    const auditCols = (db.prepare("PRAGMA table_info('audit_events')").all() as any[]).map((c) => c.name);
+    if (!auditCols.includes('prev_hash')) {
+      db.prepare("ALTER TABLE audit_events ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''").run();
+    }
+    if (!auditCols.includes('hash')) {
+      db.prepare("ALTER TABLE audit_events ADD COLUMN hash TEXT NOT NULL DEFAULT ''").run();
+    }
+
+    const aiCols = (db.prepare("PRAGMA table_info('ai_extractions')").all() as any[]).map((c) => c.name);
+    if (!aiCols.includes('is_correction')) {
+      db.prepare("ALTER TABLE ai_extractions ADD COLUMN is_correction INTEGER NOT NULL DEFAULT 0").run();
+    }
+    if (!aiCols.includes('correction_target_id')) {
+      db.prepare("ALTER TABLE ai_extractions ADD COLUMN correction_target_id TEXT").run();
+    }
+    if (!aiCols.includes('is_duplicate')) {
+      db.prepare("ALTER TABLE ai_extractions ADD COLUMN is_duplicate INTEGER NOT NULL DEFAULT 0").run();
+    }
+    if (!aiCols.includes('duplicate_of_id')) {
+      db.prepare("ALTER TABLE ai_extractions ADD COLUMN duplicate_of_id TEXT").run();
     }
   } catch (err) {
     // Migration fallback

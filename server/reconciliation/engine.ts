@@ -65,6 +65,7 @@ export function buildReconciliationRecord(params: BuildReconciliationParams): Re
 
   // 4. Reconciliation Math & Status Determination
   let status: ReconciliationStatus = 'CAPTURE_PENDING';
+  let matchStatus: import('../types').ReconciliationMatchStatus = 'PENDING';
   let diffLedgerVsCaptureGross: string | null = null;
   let diffQuoteVsCaptureGross: string | null = null;
   let observedProviderFee: string | null = null;
@@ -73,9 +74,11 @@ export function buildReconciliationRecord(params: BuildReconciliationParams): Re
 
   if (!capture) {
     status = quote && quote.status === 'QUOTE_AVAILABLE' ? 'QUOTE_AVAILABLE' : 'QUOTE_PENDING';
+    matchStatus = 'PENDING';
     explanations.push('Awaiting provider capture execution.');
   } else if (capture.status === 'FAILED') {
     status = 'CAPTURE_FAILED';
+    matchStatus = 'FAILED';
     explanations.push('Provider transaction capture failed or was rejected by the processor.');
   } else if (capture.status === 'COMPLETED') {
     status = 'RECONCILIATION_COMPLETE';
@@ -92,16 +95,20 @@ export function buildReconciliationRecord(params: BuildReconciliationParams): Re
       const diff = grossDec.minus(ledgerDec);
       diffLedgerVsCaptureGross = formatCurrencyAmount(diff, transfer.currency);
 
-      if (!diff.isZero()) {
-        explanations.push(
-          `Gross capture differs from ledger debt by ${diffLedgerVsCaptureGross} ${transfer.currency}.`
-        );
+      if (diff.isZero()) {
+        matchStatus = 'MATCHED';
+        explanations.push(`Gross capture matches expected obligation exactly (${transfer.amount} ${transfer.currency}).`);
+      } else if (diff.isPositive()) {
+        matchStatus = 'OVERPAID';
+        explanations.push(`Overpayment detected: Captured gross exceeds obligation by ${diffLedgerVsCaptureGross} ${transfer.currency}.`);
       } else {
-        explanations.push(`Gross capture matches ledger debt exactly (${transfer.amount} ${transfer.currency}).`);
+        matchStatus = 'UNDERPAID';
+        explanations.push(`Underpayment detected: Captured gross is short by ${diff.abs().toFixed(2)} ${transfer.currency}.`);
       }
     } else {
+      matchStatus = 'REQUIRES_REVIEW';
       explanations.push(
-        `Cross-currency comparison: Ledger in ${transfer.currency}, Provider captured in ${capture.grossCurrency}. Direct subtraction is not economically comparable.`
+        `Cross-currency capture: Obligation in ${transfer.currency}, Provider captured in ${capture.grossCurrency}. Direct subtraction requires FX conversion.`
       );
     }
 
@@ -131,12 +138,22 @@ export function buildReconciliationRecord(params: BuildReconciliationParams): Re
     );
   }
 
+  const decisionTrace = {
+    expectedAmount: `${transfer.amount} ${transfer.currency}`,
+    capturedGross: capture ? `${capture.grossAmount} ${capture.grossCurrency}` : 'N/A',
+    providerFee: capture ? `${capture.feeAmount} ${capture.feeCurrency}` : 'N/A',
+    netReceived: capture ? `${capture.netAmount} ${capture.netCurrency}` : 'N/A',
+    variance: diffLedgerVsCaptureGross ? `${diffLedgerVsCaptureGross} ${transfer.currency}` : '0.00',
+    summary: explanations.join(' '),
+  };
+
   return {
     id,
     transferId: transfer.id,
     transactionId: captureId || `TX-${id.substring(0, 8)}`,
     provider,
     status,
+    matchStatus,
     captureProvenance: provider === 'PAYPAL_SANDBOX' ? 'PAYPAL-CAPTURE' : 'SIMULATED',
     ledgerOriginalAmount,
     ledgerOriginalCurrency,
@@ -167,6 +184,7 @@ export function buildReconciliationRecord(params: BuildReconciliationParams): Re
     observedProviderFee,
     unobservableChargesEstimate,
     explanation: explanations.join(' '),
+    decisionTrace,
     createdAt: new Date().toISOString(),
   };
 }

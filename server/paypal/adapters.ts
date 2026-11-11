@@ -79,6 +79,8 @@ export class PayPalCheckoutSandboxAdapter implements PaymentProvider {
         brand_name: 'ClearSettle',
         user_action: 'PAY_NOW',
         shipping_preference: 'NO_SHIPPING',
+        ...(req.returnUrl ? { return_url: req.returnUrl } : {}),
+        ...(req.cancelUrl ? { cancel_url: req.cancelUrl } : {}),
       },
     };
 
@@ -265,7 +267,9 @@ export class DemoProviderAdapter implements PaymentProvider {
     const fakeOrderId = `DEMO-ORDER-${uuidv4().substring(0, 8).toUpperCase()}`;
     return {
       providerOrderId: fakeOrderId,
-      approvalUrl: `https://sandbox.clearsettle.demo/checkout?order=${fakeOrderId}`,
+      approvalUrl: req.returnUrl
+        ? `${req.returnUrl}&token=${fakeOrderId}&PayerID=DEMO-BUYER-PAYPAL`
+        : `https://sandbox.clearsettle.demo/checkout?order=${fakeOrderId}`,
       status: 'APPROVED',
     };
   }

@@ -1,11 +1,16 @@
 import { AIExtractionItem, GroupMember } from '../types';
-import { extractExpensesFromConversationFallback, extractReceiptDataFallback } from './classifier';
+import {
+  extractExpensesFromConversationFallback,
+  extractReceiptDataFallback,
+  extractInvoiceDataFallback,
+} from './classifier';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ParseOptions {
-  sourceType: 'CONVERSATION' | 'RECEIPT';
+  sourceType: 'CONVERSATION' | 'RECEIPT' | 'INVOICE';
   input: string;
   members: GroupMember[];
+  existingExpenses?: Array<{ id: string; amount: string; currency: string; description: string; payerName?: string }>;
 }
 
 export interface ParseResult {
@@ -13,15 +18,18 @@ export interface ParseResult {
   isLiveAI: boolean;
   overallSummary: string;
   items: AIExtractionItem[];
+  invoiceData?: any;
 }
 
 /**
- * AI Expense Intelligence Service with dual execution modes:
+ * AI Expense & Financial Document Intelligence Service with dual execution modes:
  * 1. Live Gemini LLM structured parsing when GEMINI_API_KEY is configured.
- * 2. High-fidelity Fallback Demonstration Engine when running in demo/offline mode.
+ * 2. High-fidelity Fallback Demonstration Engine with speech-act classification,
+ *    multi-message contextual awareness, correction tracking, duplicate detection,
+ *    and invoice document extraction.
  */
 export async function parseFinancialInput(options: ParseOptions): Promise<ParseResult> {
-  const { sourceType, input, members } = options;
+  const { sourceType, input, members, existingExpenses = [] } = options;
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (apiKey && apiKey.trim() !== '') {
@@ -46,6 +54,10 @@ export async function parseFinancialInput(options: ParseOptions): Promise<ParseR
           splitType: 'EQUAL',
           missingInformation: item.missingInformation || [],
           explanation: item.explanation,
+          isCorrection: item.isCorrection || false,
+          correctionTargetId: item.correctionTargetId,
+          isDuplicate: item.isDuplicate || false,
+          duplicateOfId: item.duplicateOfId,
           status: 'PENDING_REVIEW',
         })),
       };
@@ -56,10 +68,38 @@ export async function parseFinancialInput(options: ParseOptions): Promise<ParseR
   }
 
   // Demonstration Fallback Mode
+  if (sourceType === 'INVOICE') {
+    const inv = extractInvoiceDataFallback(input);
+    return {
+      engine: 'FALLBACK_DEMO_PARSER',
+      isLiveAI: false,
+      overallSummary: `[DEMO PARSER] ${inv.explanation}`,
+      invoiceData: inv,
+      items: [
+        {
+          id: uuidv4(),
+          classification: 'CONFIRMED_EXPENSE',
+          confidenceScore: 0.95,
+          payerName: inv.clientName,
+          involvedMembers: [inv.clientName],
+          amount: inv.amount,
+          currency: inv.currency,
+          description: `Invoice ${inv.invoiceNumber}: ${inv.description}`,
+          date: inv.issueDate,
+          sourceText: input.slice(0, 100),
+          splitType: 'EXACT',
+          missingInformation: [],
+          explanation: inv.explanation,
+          status: 'PENDING_REVIEW',
+        },
+      ],
+    };
+  }
+
   const fallbackOutput =
     sourceType === 'RECEIPT'
       ? extractReceiptDataFallback(input)
-      : extractExpensesFromConversationFallback(input, members);
+      : extractExpensesFromConversationFallback(input, members, existingExpenses);
 
   return {
     engine: 'FALLBACK_DEMO_PARSER',
@@ -80,6 +120,10 @@ export async function parseFinancialInput(options: ParseOptions): Promise<ParseR
       splitType: 'EQUAL',
       missingInformation: item.missingInformation,
       explanation: item.explanation,
+      isCorrection: item.isCorrection || false,
+      correctionTargetId: item.correctionTargetId,
+      isDuplicate: item.isDuplicate || false,
+      duplicateOfId: item.duplicateOfId,
       status: 'PENDING_REVIEW',
     })),
   };

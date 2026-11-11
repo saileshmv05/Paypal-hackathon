@@ -14,6 +14,7 @@ import {
   ChevronUp,
   FileSpreadsheet,
   AlertOctagon,
+  Sparkles,
 } from 'lucide-react';
 import { Group, ReconciliationRecord, SettlementTransfer } from '../types';
 import { PayPalSandboxNotice, UnobservableFeesNote } from '../components/Disclaimers';
@@ -289,6 +290,11 @@ export const ReconciliationPage: React.FC<ReconciliationPageProps> = ({
                         {rec.transaction_id}
                       </span>
                       <ProvenanceBadge type={captureProvenance} />
+                      {rec.match_status && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
+                          {rec.match_status}
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-slate-400 font-mono">
                       Recorded: {rec.created_at?.replace('T', ' ').split('.')[0]} • Provider: {rec.provider}
@@ -438,6 +444,43 @@ export const ReconciliationPage: React.FC<ReconciliationPageProps> = ({
                           Payee received net proceeds of {rec.capture_net_amount} {rec.capture_net_currency}.
                         </div>
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Plain-Language Decision Trace Banner */}
+                <div className="p-4 bg-slate-900 text-white border-t border-slate-800 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Decision Trace & Settlement Audit</span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                    {rec.decisionTrace?.summary || rec.explanation}
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80 text-[11px] font-mono">
+                    <div>
+                      <span className="text-slate-400">Expected Debt: </span>
+                      <span className="font-bold text-white">
+                        {rec.decisionTrace?.expectedAmount || `${rec.ledger_original_amount} ${rec.ledger_original_currency}`}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Captured Gross: </span>
+                      <span className="font-bold text-white">
+                        {rec.decisionTrace?.capturedGross || `${rec.capture_gross_amount || '0'} ${rec.capture_gross_currency || ''}`}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Fee Deducted: </span>
+                      <span className="font-bold text-rose-300">
+                        -{rec.decisionTrace?.providerFee || `${rec.capture_fee_amount || '0'} ${rec.capture_fee_currency || ''}`}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Net Received: </span>
+                      <span className="font-bold text-emerald-400">
+                        {rec.decisionTrace?.netReceived || `${rec.capture_net_amount || '0'} ${rec.capture_net_currency || ''}`}
+                      </span>
                     </div>
                   </div>
                 </div>
