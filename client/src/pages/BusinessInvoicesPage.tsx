@@ -29,11 +29,13 @@ import { ProvenanceBadge } from './ReconciliationPage';
 interface BusinessInvoicesPageProps {
   workspaceId: string;
   onNavigateToReconciliation: () => void;
+  onOpenCreateWorkspace?: () => void;
 }
 
 export const BusinessInvoicesPage: React.FC<BusinessInvoicesPageProps> = ({
   workspaceId,
   onNavigateToReconciliation,
+  onOpenCreateWorkspace,
 }) => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [reconciliations, setReconciliations] = useState<ReconciliationRecord[]>([]);
@@ -204,6 +206,16 @@ export const BusinessInvoicesPage: React.FC<BusinessInvoicesPageProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
               AI Invoice OCR
             </button>
+            {onOpenCreateWorkspace && (
+              <button
+                onClick={onOpenCreateWorkspace}
+                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-xs transition-colors"
+                title="Create a new business workspace"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                New Workspace
+              </button>
+            )}
             <button
               onClick={() => {
                 resetForm();

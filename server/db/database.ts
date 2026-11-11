@@ -2,7 +2,9 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-const dbPath = path.resolve(__dirname, '../../clearsettle.db');
+const dbPath = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : path.resolve(__dirname, '../../clearsettle.db');
 
 export const db = new Database(dbPath);
 
@@ -216,12 +218,31 @@ export function initDatabase() {
       created_at TEXT NOT NULL,
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'MEMBER',
+      created_at TEXT NOT NULL
+    );
   `;
 
   db.exec(schema);
 
   // Column migrations for existing databases
   try {
+    const groupCols = (db.prepare("PRAGMA table_info('groups')").all() as any[]).map((c) => c.name);
+    if (!groupCols.includes('created_by')) {
+      db.prepare("ALTER TABLE groups ADD COLUMN created_by TEXT").run();
+    }
+
+    const workspaceCols = (db.prepare("PRAGMA table_info('workspaces')").all() as any[]).map((c) => c.name);
+    if (!workspaceCols.includes('owner_id')) {
+      db.prepare("ALTER TABLE workspaces ADD COLUMN owner_id TEXT").run();
+    }
+
     const reconCols = (db.prepare("PRAGMA table_info('reconciliations')").all() as any[]).map((c) => c.name);
     if (!reconCols.includes('capture_provenance')) {
       db.prepare("ALTER TABLE reconciliations ADD COLUMN capture_provenance TEXT NOT NULL DEFAULT 'SIMULATED'").run();

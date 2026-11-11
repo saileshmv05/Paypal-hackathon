@@ -270,6 +270,16 @@ export interface Invoice {
   created_at: string;
 }
 
+export interface UserContext {
+  id: string;
+  name: string;
+  email: string;
+  role: 'ADMIN' | 'MEMBER' | 'OWNER';
+  groupIds: string[];
+  workspaceIds: string[];
+  isDemo?: boolean;
+}
+
 export interface Client {
   id: string;
   workspace_id: string;

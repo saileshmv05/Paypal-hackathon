@@ -24,11 +24,14 @@ import {
   requireWorkspaceAccess,
   requireAdmin,
   createSession,
+  createUserSession,
   destroySession,
+  hashPassword,
+  verifyPassword,
   DEMO_PERSONAS,
 } from './middleware/auth';
 import { calculateExpenseSplits } from './financial/splits';
-import { CurrencyCode, Expense, GroupMember, SettlementTransfer } from './types';
+import { CurrencyCode, Expense, GroupMember, SettlementPlan, SettlementTransfer } from './types';
 
 dotenv.config();
 
@@ -65,6 +68,29 @@ function rateLimiter(limit: number, windowMs: number) {
 initDatabase();
 
 // ----------------------------------------------------------------------
+// SYSTEM HEALTH & DIAGNOSTICS (DEPLOYMENT READINESS)
+// ----------------------------------------------------------------------
+app.get('/api/health', (req, res) => {
+  try {
+    const dbCheck = db.prepare('SELECT 1 as ok').get();
+    res.json({
+      status: 'HEALTHY',
+      timestamp: new Date().toISOString(),
+      platform: 'ClearSettle Fintech Platform',
+      version: '1.2.0',
+      database: dbCheck ? 'CONNECTED' : 'DISCONNECTED',
+      environment: process.env.NODE_ENV || 'production',
+      paypalMode: process.env.ENABLE_DEMO_PROVIDER === 'false' ? 'SANDBOX_LIVE' : 'DEMO_SANDBOX',
+    });
+  } catch (err: any) {
+    res.status(503).json({
+      status: 'UNHEALTHY',
+      error: err.message,
+    });
+  }
+});
+
+// ----------------------------------------------------------------------
 // AUTHENTICATION & DEMO PERSONA MANAGEMENT
 // ----------------------------------------------------------------------
 app.get('/api/auth/personas', (req, res) => {
@@ -79,6 +105,64 @@ app.get('/api/auth/personas', (req, res) => {
     description: p.description,
   }));
   res.json(personas);
+});
+
+app.post('/api/auth/register', rateLimiter(15, 60000), (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email, and password are required.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail.includes('@') || password.length < 6) {
+    return res.status(400).json({ error: 'Valid email and a password of at least 6 characters are required.' });
+  }
+
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(cleanEmail);
+  if (existing) {
+    return res.status(409).json({ error: 'An account with this email already exists. Please log in.' });
+  }
+
+  const userId = `user-${uuidv4().substring(0, 8)}`;
+  const passwordHash = hashPassword(password);
+  const createdAt = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO users (id, name, email, password_hash, role, created_at)
+    VALUES (?, ?, ?, ?, 'MEMBER', ?)
+  `).run(userId, name.trim(), cleanEmail, passwordHash, createdAt);
+
+  const session = createUserSession({
+    id: userId,
+    name: name.trim(),
+    email: cleanEmail,
+    role: 'MEMBER',
+  });
+
+  res.status(201).json(session);
+});
+
+app.post('/api/auth/login', rateLimiter(20, 60000), (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const user: any = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail);
+
+  if (!user || !verifyPassword(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Invalid email or password.' });
+  }
+
+  const session = createUserSession({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  });
+
+  res.json(session);
 });
 
 app.post('/api/auth/demo-session', rateLimiter(40, 60000), (req, res) => {
@@ -96,6 +180,13 @@ app.get('/api/auth/session', (req: any, res) => {
     return res.status(401).json({ authenticated: false, user: null });
   }
   res.json({ authenticated: true, user: req.user });
+});
+
+app.get('/api/auth/me', (req: any, res) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  res.json(req.user);
 });
 
 app.post('/api/auth/logout', (req: any, res) => {
@@ -143,29 +234,67 @@ app.post('/api/demo/reset', requireAdmin, (req, res) => {
 // ----------------------------------------------------------------------
 // GROUP MANAGEMENT (PERSONAL SEGMENT)
 // ----------------------------------------------------------------------
-app.get('/api/groups', (req, res) => {
-  const groups = db.prepare('SELECT * FROM groups ORDER BY created_at DESC').all();
+app.get('/api/groups', (req: any, res) => {
+  // If user is ADMIN or demo persona Alex/Sam, return all/demo groups
+  if (req.user?.role === 'ADMIN' || req.user?.id === 'user-alex-admin' || req.user?.id === 'user-sam-member') {
+    const groups = db.prepare('SELECT * FROM groups ORDER BY created_at DESC').all();
+    return res.json(groups);
+  }
+
+  // If authenticated as a real user, return only groups they belong to or created
+  if (req.user) {
+    const groups = db.prepare(`
+      SELECT DISTINCT g.* FROM groups g
+      LEFT JOIN group_members m ON g.id = m.group_id
+      WHERE g.created_by = ? OR m.email = ? OR m.id = ?
+      ORDER BY g.created_at DESC
+    `).all(req.user.id, req.user.email, req.user.id);
+    return res.json(groups);
+  }
+
+  // If unauthenticated, return demo groups so public landing/preview works
+  const groups = db.prepare('SELECT * FROM groups WHERE id = ?').all('group-intl-trip-2026');
   res.json(groups);
 });
 
-app.post('/api/groups', (req, res) => {
+app.post('/api/groups', (req: any, res) => {
   const { name, description, baseCurrency = 'EUR' } = req.body;
   if (!name) return res.status(400).json({ error: 'Group name is required' });
 
   const id = `group-${uuidv4().substring(0, 8)}`;
   const createdAt = new Date().toISOString();
+  const createdBy = req.user?.id || 'user-admin';
 
   db.prepare(`
-    INSERT INTO groups (id, name, description, base_currency, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, name, description || '', baseCurrency, createdAt);
+    INSERT INTO groups (id, name, description, base_currency, created_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, name, description || '', baseCurrency, createdBy, createdAt);
+
+  // Automatically add creator as first group member
+  const memberId = `member-${uuidv4().substring(0, 8)}`;
+  db.prepare(`
+    INSERT INTO group_members (id, group_id, name, country, preferred_currency, email, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    memberId,
+    id,
+    req.user?.name || 'Organizer',
+    'International',
+    baseCurrency,
+    req.user?.email || 'organizer@clearsettle.local',
+    createdAt
+  );
+
+  if (req.user && !req.user.groupIds.includes(id)) {
+    req.user.groupIds.push(id);
+  }
 
   recordAuditEvent({
     groupId: id,
     entityType: 'GROUP',
     entityId: id,
     eventType: 'GROUP_CREATED',
-    actor: 'Admin',
+    actor: req.user?.name || 'Organizer',
     description: `Created group "${name}" with base currency ${baseCurrency}`,
     metadata: { name, baseCurrency },
   });
@@ -495,6 +624,86 @@ app.get('/api/groups/:id/settlement', requireGroupAccess, (req, res) => {
     balances.balances,
     members
   );
+
+  // Synchronize generated settlement strategies to database so every transfer is an authoritative DB obligation
+  function syncPlanToDatabase(plan: SettlementPlan, strategyType: string) {
+    if (!plan || !plan.transfers || plan.transfers.length === 0) return;
+
+    let dbPlan: any = db.prepare('SELECT * FROM settlement_plans WHERE group_id = ? AND strategy = ?').get(req.params.id, strategyType);
+    const planId = dbPlan ? dbPlan.id : (plan.id || `plan-${strategyType.toLowerCase()}-${req.params.id}`);
+
+    if (!dbPlan) {
+      db.prepare(`
+        INSERT INTO settlement_plans (id, group_id, strategy, total_debt_volume_base, estimated_fee_cost_base, zero_sum_subsets_count, explanation, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        planId,
+        req.params.id,
+        strategyType,
+        plan.totalDebtVolumeBase || '0.00',
+        plan.estimatedFeeCostBase || '0.00',
+        plan.zeroSumSubsetsCount || 1,
+        plan.explanation || '',
+        new Date().toISOString()
+      );
+    }
+
+    const existingTransfers: any[] = db.prepare('SELECT * FROM settlement_transfers WHERE plan_id = ?').all(planId);
+    const existingMap = new Map<string, any>();
+    for (const et of existingTransfers) {
+      existingMap.set(`${et.from_member_id}->${et.to_member_id}`, et);
+    }
+
+    const insertTransfer = db.prepare(`
+      INSERT INTO settlement_transfers (
+        id, plan_id, from_member_id, from_member_name,
+        to_member_id, to_member_name, amount, currency,
+        target_amount, target_currency, estimated_fee, status,
+        paypal_order_id, reconciliation_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const t of plan.transfers) {
+      const key = `${t.fromMemberId}->${t.toMemberId}`;
+      const existing = existingMap.get(key);
+
+      if (existing) {
+        t.id = existing.id;
+        t.status = existing.status;
+        t.paypalOrderId = existing.paypal_order_id;
+        t.reconciliationId = existing.reconciliation_id;
+        if (existing.status !== 'COMPLETED') {
+          db.prepare(`
+            UPDATE settlement_transfers
+            SET amount = ?, currency = ?, target_amount = ?, target_currency = ?, estimated_fee = ?
+            WHERE id = ?
+          `).run(t.amount, t.currency, t.targetAmount, t.targetCurrency, t.estimatedFee || '0.00', existing.id);
+        }
+      } else {
+        const newTransferId = t.id || `transfer-${uuidv4().substring(0, 8)}`;
+        t.id = newTransferId;
+        insertTransfer.run(
+          newTransferId,
+          planId,
+          t.fromMemberId,
+          t.fromMemberName,
+          t.toMemberId,
+          t.toMemberName,
+          t.amount,
+          t.currency,
+          t.targetAmount,
+          t.targetCurrency,
+          t.estimatedFee || '0.00',
+          t.status || 'PENDING',
+          t.paypalOrderId || null,
+          t.reconciliationId || null
+        );
+      }
+    }
+  }
+
+  syncPlanToDatabase(minTransfersPlan, 'MIN_TRANSFERS');
+  syncPlanToDatabase(minCostPlan, 'MIN_COST');
 
   res.json({
     baseCurrency: group.base_currency,
@@ -1183,34 +1392,53 @@ app.get('/checkout/cancel', (req, res) => {
 // ----------------------------------------------------------------------
 // SMALL BUSINESS WORKSPACE & INVOICING API
 // ----------------------------------------------------------------------
-app.get('/api/workspaces', (req, res) => {
-  const workspaces = db.prepare('SELECT * FROM workspaces ORDER BY created_at DESC').all();
+app.get('/api/workspaces', (req: any, res) => {
+  // If user is ADMIN or demo persona Elena/Alex, return all/demo workspaces
+  if (req.user?.role === 'ADMIN' || req.user?.id === 'user-alex-admin' || req.user?.id === 'user-agency-owner') {
+    const workspaces = db.prepare('SELECT * FROM workspaces ORDER BY created_at DESC').all();
+    return res.json(workspaces);
+  }
+
+  // If authenticated as a real user, return workspaces they own
+  if (req.user) {
+    const workspaces = db.prepare('SELECT * FROM workspaces WHERE owner_id = ? ORDER BY created_at DESC').all(req.user.id);
+    return res.json(workspaces);
+  }
+
+  // Unauthenticated / public demo preview
+  const workspaces = db.prepare('SELECT * FROM workspaces WHERE id = ?').all('workspace-agency-demo');
   res.json(workspaces);
 });
 
-app.post('/api/workspaces', (req, res) => {
+app.post('/api/workspaces', (req: any, res) => {
   const { name, type = 'BUSINESS', baseCurrency = 'EUR', ownerName, description } = req.body;
-  if (!name || !ownerName) return res.status(400).json({ error: 'Name and owner name are required' });
+  if (!name) return res.status(400).json({ error: 'Workspace name is required' });
 
   const id = `workspace-${uuidv4().substring(0, 8)}`;
   const createdAt = new Date().toISOString();
+  const owner = ownerName || req.user?.name || 'Owner';
+  const ownerId = req.user?.id || 'user-admin';
 
   db.prepare(`
-    INSERT INTO workspaces (id, name, type, base_currency, owner_name, description, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, type, baseCurrency, ownerName, description || '', createdAt);
+    INSERT INTO workspaces (id, name, type, base_currency, owner_name, owner_id, description, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, type, baseCurrency, owner, ownerId, description || '', createdAt);
+
+  if (req.user && !req.user.workspaceIds.includes(id)) {
+    req.user.workspaceIds.push(id);
+  }
 
   recordAuditEvent({
     groupId: id,
     entityType: 'WORKSPACE',
     entityId: id,
     eventType: 'WORKSPACE_CREATED',
-    actor: ownerName,
+    actor: owner,
     description: `Created ${type.toLowerCase()} workspace "${name}" with base currency ${baseCurrency}`,
     metadata: { name, type, baseCurrency },
   });
 
-  res.json({ id, name, type, baseCurrency, ownerName, description, createdAt });
+  res.json({ id, name, type, baseCurrency, ownerName: owner, description, createdAt });
 });
 
 app.get('/api/workspaces/:id', requireWorkspaceAccess, (req, res) => {

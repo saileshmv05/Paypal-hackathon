@@ -52,6 +52,36 @@ export async function initDemoSession(persona = 'alex-organizer'): Promise<{ tok
   return data;
 }
 
+export async function registerUser(name: string, email: string, password: string): Promise<{ token: string; user: UserContext }> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Registration failed');
+  }
+  const data = await res.json();
+  setAuthToken(data.token);
+  return data;
+}
+
+export async function loginUser(email: string, password: string): Promise<{ token: string; user: UserContext }> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Login failed');
+  }
+  const data = await res.json();
+  setAuthToken(data.token);
+  return data;
+}
+
 export async function fetchAuthSession(): Promise<{ authenticated: boolean; user: UserContext | null }> {
   const res = await fetch(`${API_BASE}/auth/session`, {
     headers: getHeaders(),
@@ -310,6 +340,25 @@ export async function fetchWorkspaceReconciliations(workspaceId: string): Promis
 export async function fetchWorkspaces(): Promise<any[]> {
   const res = await fetch(`${API_BASE}/workspaces`, { headers: getHeaders() });
   if (!res.ok) throw new Error('Failed to fetch workspaces');
+  return res.json();
+}
+
+export async function createWorkspace(data: {
+  name: string;
+  type?: string;
+  baseCurrency?: string;
+  ownerName?: string;
+  description?: string;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/workspaces`, {
+    method: 'POST',
+    headers: getHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to create workspace');
+  }
   return res.json();
 }
 

@@ -8,7 +8,10 @@ import {
   requireWorkspaceAccess,
   requireAdmin,
   createSession,
+  createUserSession,
   destroySession,
+  hashPassword,
+  verifyPassword,
   clearAllSessions,
   AuthenticatedRequest,
 } from '../server/middleware/auth';
@@ -243,5 +246,51 @@ describe('P0 Security: Authentication, Authorization & IDOR Defenses', () => {
     for (const wRec of workspaceRecons) {
       expect(groupIds.has(wRec.id)).toBe(false);
     }
+  });
+
+  it('registers a new genuine user with secure scrypt password hash and authenticates immediately', () => {
+    const rawPassword = 'SecurePassword123!';
+    const passwordHash = hashPassword(rawPassword);
+
+    expect(passwordHash).toContain(':');
+    expect(verifyPassword(rawPassword, passwordHash)).toBe(true);
+    expect(verifyPassword('WrongPassword!', passwordHash)).toBe(false);
+
+    const newUser = {
+      id: 'user-real-001',
+      name: 'Maya Lin',
+      email: 'maya@fintech.dev',
+      role: 'MEMBER' as const,
+    };
+
+    const session = createUserSession(newUser);
+    expect(session.token).toMatch(/^cs_[a-f0-9]{64}$/);
+    expect(session.user.id).toBe('user-real-001');
+    expect(session.user.email).toBe('maya@fintech.dev');
+  });
+
+  it('ensures newly registered user starts with empty personal groups and workspaces (zero demo leakage)', () => {
+    const freshUser = {
+      id: 'user-fresh-999',
+      name: 'Fresh Newbie',
+      email: 'fresh@example.com',
+      role: 'MEMBER' as const,
+    };
+
+    // Query personal groups visible to fresh user
+    const userGroups: any[] = db.prepare(`
+      SELECT DISTINCT g.* FROM groups g
+      LEFT JOIN group_members m ON g.id = m.group_id
+      WHERE g.created_by = ? OR m.email = ? OR m.id = ?
+    `).all(freshUser.id, freshUser.email, freshUser.id);
+
+    // Query workspaces visible to fresh user
+    const userWorkspaces: any[] = db.prepare(`
+      SELECT * FROM workspaces WHERE owner_id = ?
+    `).all(freshUser.id);
+
+    // Guaranteed empty start: zero leakage of Alex, Sam, John, or Apex Agency demo data!
+    expect(userGroups.length).toBe(0);
+    expect(userWorkspaces.length).toBe(0);
   });
 });

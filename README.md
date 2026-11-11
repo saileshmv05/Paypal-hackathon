@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
-[![Vitest](https://img.shields.io/badge/Tests-49%20Passing-emerald.svg)](tests/)
+[![Vitest](https://img.shields.io/badge/Tests-53%20Passing-emerald.svg)](tests/)
 [![Security](https://img.shields.io/badge/Security-Fail--Closed%20%7C%20IDOR%20Guarded-0284c7.svg)](#4-security-architecture--idor-defenses)
 [![Audit](https://img.shields.io/badge/Audit-SHA--256%20Tamper--Evident-10b981.svg)](#6-tamper-evident-cryptographic-audit-chain)
 [![PayPal](https://img.shields.io/badge/PayPal-Orders%20v2%20REST-003087.svg)](https://developer.paypal.com/)
@@ -33,7 +33,7 @@ npm install && npm run build --prefix client
 # 2. Reset and seed demonstration database
 npm run seed
 
-# 3. Run automated verification test suite (49 tests across 12 suites)
+# 3. Run automated verification test suite (53 tests across 12 suites)
 npm test
 
 # 4. Compile client assets and server bundle
@@ -59,6 +59,7 @@ flowchart TD
 
     subgraph Security ["2. Security & Access Control Layer"]
         BearerToken["256-Bit Cryptographic Bearer Sessions"]
+        ScryptAuth["Scrypt Password Hashing & Real User Auth"]
         FailClosed["Fail-Closed Auth Middleware (No Header Trust)"]
         IDORGuard["Tenant IDOR Guards (Group & Workspace Scoped)"]
         RateLimiter["IP Sliding-Window Rate Limiters"]
@@ -93,7 +94,7 @@ flowchart TD
     end
 
     PersonalTravel & BusinessInvoices & Chat --> BearerToken
-    BearerToken --> FailClosed --> IDORGuard --> RateLimiter
+    BearerToken --> ScryptAuth --> FailClosed --> IDORGuard --> RateLimiter
     RateLimiter --> Gemini & Fallback
     Gemini & Fallback --> Classifier --> HITL
     HITL --> DecimalMath
@@ -106,23 +107,23 @@ flowchart TD
 
 ---
 
-## 3. Dual-Segment Financial Model
+## 3. Dual-Segment Architecture & Experience Modes
 
-### Segment A: Personal Travel & Shared Expenses
-- **Tokyo & Munich Global Summit 2026**: Seeded dataset demonstrating 3 international participants across 3 distinct home currencies:
-  - **Alex (Germany — EUR)**
-  - **Sam (United States — USD)**
-  - **John (Japan — JPY)**
-- **Multi-Split Expense Engine**: Supports **Equal**, **Exact Amount**, **Percentage**, and **Weighted Share** allocations with deterministic minor-unit penny distribution.
-- **Settlement Optimization**:
-  - *Minimum Transfers*: Exact $(N - K)$ zero-sum subset partition theorem solver ($N \le 12$).
-  - *Minimum Estimated Cost*: Currency-pairing heuristics to eliminate retail FX spreads before routing cross-border transfers.
+ClearSettle supports two distinct, strictly separated user experiences:
 
-### Segment B: Small Business & Freelance Invoicing
-- **Apex Creative Digital Agency**: Demonstrates client obligations, invoice issuance, and payment tracking for international agency operations.
-- **AI Invoice OCR**: Parses raw contract emails and billing statements into structured invoices with client details, due dates, and line item amounts.
-- **Merchant Checkout**: Full client payment execution via PayPal Orders v2 REST API with authoritative database amount retrieval.
-- **B2B Fee Reconciliation**: Inspects gross invoice payments against PayPal commercial seller fees (e.g. 3.49% + fixed fee) to report true net operating proceeds.
+### Experience Mode A: Demo Sandbox Mode
+- **Zero Configuration Required**: Judges can test the full platform immediately without setting up credentials or API keys.
+- **Seeded Datasets**:
+  - *Personal Group*: Tokyo & Munich Global Summit 2026 (Alex in EUR, Sam in USD, John in JPY).
+  - *Small Business Workspace*: Apex Creative Digital Agency (EUR billing, cross-border client invoices, PayPal seller fee audit).
+- **Explicit Demo Badges**: Every sample record and card is visibly tagged with `DEMO DATASET` / `SIMULATED` banners so sample data is never mistaken for real transactions.
+- **Instant Persona Switching**: Switch between Alex (Organizer/Admin), Sam (Group Member), Elena (Agency Owner), or Unauthorized Stranger in one click.
+
+### Experience Mode B: Real User Mode
+- **Real User Registration & Login**: Users register with full name, email, and password (hashed with salted Node.js `scrypt`).
+- **Empty Account Onboarding**: Real users start with a clean, private dashboard showing only their own data.
+- **Zero Demo Leakage**: A newly registered user will never see Alex, Sam, John, or Apex Agency records unless they explicitly select Demo Mode.
+- **Private Resource Creation**: Real users can create their own multi-currency groups, invite participants, record and split expenses, issue B2B invoices, and execute sandbox payments.
 
 ---
 
@@ -133,7 +134,7 @@ ClearSettle implements strict fail-closed fintech security controls:
 1. **Cryptographically Secure Sessions**:
    - Authentication relies on 256-bit cryptographically secure session tokens generated via `crypto.randomBytes(32).toString('hex')`.
    - Complete removal of trust in client-supplied `x-user-id` or `x-user-role` headers.
-   - Demo personas (`alex-organizer`, `sam-member`, `agency-owner`, `guest-unauthorized`) are isolated server-side through `/api/auth/demo-login`.
+   - Demo personas (`alex-organizer`, `sam-member`, `agency-owner`, `guest-unauthorized`) are isolated server-side through `/api/auth/demo-session`.
 2. **Fail-Closed Authorization (`authMiddleware`)**:
    - Requests without a valid Bearer token result in `req.user = undefined`. Unauthenticated attempts to access protected endpoints immediately fail with `401 Unauthorized`.
 3. **Strict IDOR Prevention**:
@@ -149,10 +150,19 @@ ClearSettle implements strict fail-closed fintech security controls:
 
 ---
 
-## 5. PayPal Payment Lifecycle & State Machine
+## 5. PayPal Payment Lifecycle & Missing-Obligation Resolution
 
-ClearSettle integrates with the **PayPal Orders v2 REST API** (`intent: CAPTURE`) under realistic commercial merchant processing rules:
+### The Missing Obligation Defect & Root Cause Resolution
+- **Defect Identified**: The checkout modal previously showed `Settlement obligation [ID] not found in database.`
+- **Root Cause**: The settlement optimizer (`GET /api/groups/:id/settlement/strategies`) calculated minimum transfers dynamically in memory with freshly generated UUIDs without syncing or persisting them into `settlement_transfers`. When the frontend initiated checkout with that ID, the database had no record of it.
+- **The Fix (`syncPlanToDatabase`)**:
+  - `GET /api/groups/:id/settlement/strategies` now automatically synchronizes all calculated transfers to `settlement_transfers` and `settlement_plans` in SQLite.
+  - Matches existing completed transfers to preserve their historical `COMPLETED` status, PayPal order ID, and reconciliation ID.
+  - Guarantees every transfer returned to the UI is an authoritative database record with a valid DB ID.
+  - If an invalid or unknown ID is sent, the backend returns a clear HTTP 404 (`Settlement obligation [ID] not found in database.`).
+  - Added regression test `tests/paypal-security.test.ts` covering both missing obligation rejection and successful order initiation.
 
+### Payment State Machine:
 ```
 [Obligation Created] ──> [Order Created (DB Bound)] ──> [Buyer Approved] ──> [Capture Verified] ──> [Reconciled]
                                │                                                   │
@@ -224,7 +234,7 @@ ClearSettle uses a responsible, human-in-the-loop AI pipeline:
 
 ## 9. Automated Verification & Test Suite
 
-ClearSettle features **49 automated tests** passing across **12 test suites**:
+ClearSettle features **53 automated tests** passing across **12 test suites**:
 
 ```bash
 npm test
@@ -234,9 +244,9 @@ npm test
 
 | # | Test Suite | Tests | Domain Covered |
 |---|---|:---:|---|
-| 1 | `tests/security-auth.test.ts` | **8** | Bearer session tokens, fail-closed auth, IDOR guards, cross-group/workspace isolation, session destruction, scoped reconciliations |
-| 2 | `tests/financial-splits.test.ts` | **7** | EQUAL, EXACT, PERCENT, SHARES split math, zero penny loss remainder distribution, input validation |
-| 3 | `tests/paypal-security.test.ts` | **3** | Mismatched order ID binding rejection, capture idempotency, honest MANUAL provenance tagging |
+| 1 | `tests/security-auth.test.ts` | **10** | Bearer session tokens, fail-closed auth, IDOR guards, cross-group/workspace isolation, session destruction, scoped reconciliations, scrypt password hashing, real user empty account isolation |
+| 2 | `tests/paypal-security.test.ts` | **5** | Mismatched order ID binding rejection, capture idempotency, honest MANUAL provenance tagging, missing obligation 404 rejection regression, valid obligation order initiation |
+| 3 | `tests/financial-splits.test.ts` | **7** | EQUAL, EXACT, PERCENT, SHARES split math, zero penny loss remainder distribution, input validation |
 | 4 | `tests/audit-chain.test.ts` | **4** | Genesis-to-head hash chain verification, payload tampering detection, metadata tampering detection |
 | 5 | `tests/business-invoicing.test.ts` | **3** | Workspace invoice retrieval, B2B payment reconciliation, underpayment detection |
 | 6 | `tests/optimizer-property.test.ts` | **3** | Randomized property-based testing of $(N - K)$ solver against recursive partition algorithm ($N \le 8$), money conservation |
@@ -246,22 +256,51 @@ npm test
 | 10 | `tests/ai.test.ts` | **2** | 5-way speech-act classification, adversarial promise vs. payment disambiguation |
 | 11 | `tests/reconciliation.test.ts` | **4** | PayPal Orders v2 capture normalization, 4-way variance math, honest quote unavailability |
 | 12 | `tests/demo-hardening.test.ts` | **2** | Server capture error handling without crashing, duplicate capture prevention |
-| **Total** | **12 Test Files** | **49** | **100% Passing** |
+| **Total** | **12 Test Files** | **53** | **100% Passing** |
 
 ---
 
-## 10. Responsible Fintech Disclosures & Limitations
+## 10. Production Deployment & Readiness
 
-ClearSettle adheres to transparent fintech engineering standards:
+ClearSettle is engineered for genuine containerized or bare-metal production deployment:
 
-1. **Merchant Checkout vs. P2P Settlement**:
-   PayPal's Orders v2 REST API is a commercial merchant checkout product, not an unrestricted peer-to-peer transfer rail. Payments incur commercial processing fees (e.g. 3.49% + $0.49). ClearSettle explicitly distinguishes merchant checkouts from internal ledger debts and highlights fee deductions transparently.
-2. **Pre-Capture FX Rate Quotes**:
-   Standard PayPal developer sandbox accounts do not provide pre-authorization exchange rate quotes via `/v2/pricing/quote-exchange-rates` (returns HTTP 403/404). Real-time conversion options are selected dynamically by buyers at PayPal login. ClearSettle displays the returned status honestly.
-3. **Unobservable External Charges**:
-   Card issuer foreign transaction fees (typically 1–3% charged by credit card banks) occur outside the PayPal network and cannot be observed via PayPal APIs. ClearSettle explicitly labels these costs as unobservable estimates.
-4. **Tamper-Evident Ledger**:
-   The SHA-256 audit chain provides cryptographic tamper detection for the application database. It is not an immutable distributed blockchain or proof-of-work network.
+### 1. Health Diagnostics
+```http
+GET /api/health
+```
+Response:
+```json
+{
+  "status": "HEALTHY",
+  "timestamp": "2026-11-11T23:00:00Z",
+  "platform": "ClearSettle Fintech Platform",
+  "version": "1.2.0",
+  "database": "CONNECTED",
+  "environment": "production",
+  "paypalMode": "DEMO_SANDBOX"
+}
+```
+
+### 2. Persistent Storage (SQLite)
+Configure `DATABASE_PATH` in `.env` to point to a persistent volume (e.g. `/data/clearsettle.db` on Render, Railway, Fly.io, or AWS ECS). SQLite WAL mode guarantees ACID reliability and concurrency.
+
+### 3. Production Build & Start
+```bash
+# Production client build & TypeScript compilation
+npm run build
+
+# Start production server (serves compiled static assets from client/dist)
+NODE_ENV=production PORT=5000 npm run server
+```
+
+### 4. Deployment Checklist
+- [x] CORS configured for production domain.
+- [x] Relative API routing (`/api`) eliminates cross-origin issues.
+- [x] Sensitive endpoints rate-limited via sliding-window IP buckets.
+- [x] Passwords hashed using Node.js crypto `scrypt` with random salt.
+- [x] Session tokens are 256-bit cryptographically secure strings.
+- [x] No committed secrets or hardcoded administrator passwords.
+- [x] Zero mock fallbacks pretending to be real PayPal transactions.
 
 ---
 
@@ -272,25 +311,25 @@ clearsettle/
 ├── client/                               # Vite + React + Tailwind frontend
 │   └── src/
 │       ├── api/client.ts                 # Type-safe API client with Bearer session auth
-│       ├── components/                   # ProvenanceBadge, PaymentEvidenceTimeline, Disclaimers, Navbar
+│       ├── components/                   # AuthModal, CreateGroupModal, CreateWorkspaceModal, PaymentEvidenceTimeline, Navbar
 │       └── pages/                        # Personal & Business pages (Dashboard, Invoices, Reconciliation, Audit)
 ├── server/                               # Express 5 + TypeScript backend
 │   ├── ai/                               # Gemini 1.5 Flash service & Speech-Act Classifier
 │   ├── audit/chain.ts                    # SHA-256 audit chain with canonical metadata hashing
 │   ├── config/fees.ts                    # Centralized PayPal fee constants with documentation URLs
 │   ├── financial/                        # Decimal.js arithmetic, split engine, ECB reference rates
-│   ├── middleware/auth.ts                # Cryptographic sessions, fail-closed auth, IDOR guards
+│   ├── middleware/auth.ts                # Cryptographic sessions, fail-closed auth, scrypt password hashing, IDOR guards
 │   ├── optimizer/                        # (N - K) Zero-Sum Subset Solver & Cost Model
 │   ├── paypal/                           # Orders v2 REST Client, adapters, state machine
 │   ├── reconciliation/engine.ts          # 4-way comparative reconciliation engine & decision traces
 │   ├── seed.ts                           # Seed dataset for Personal Group and Small Business Workspace
-│   └── index.ts                          # REST API routes & database operations
+│   └── index.ts                          # REST API routes, health check, and database operations
 ├── evidence/                             # Empirical verification artifacts (NEVER FABRICATED)
 │   ├── ai_eval.md                        # 32-sample benchmark & confusion matrix
 │   ├── quote_probe.json                  # Live /v2/pricing/quote-exchange-rates HTTP response
 │   ├── summary.csv                       # Empirical sandbox capture audit table
 │   └── summary.md                        # Empirical analysis report
-├── tests/                                # 49 automated Vitest tests across 12 suites
+├── tests/                                # 53 automated Vitest tests across 12 suites
 ├── LICENSE                               # MIT License
 └── package.json
 ```

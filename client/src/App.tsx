@@ -11,6 +11,9 @@ import { ReconciliationPage } from './pages/ReconciliationPage';
 import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { BusinessInvoicesPage } from './pages/BusinessInvoicesPage';
+import { AuthModal } from './components/AuthModal';
+import { CreateGroupModal } from './components/CreateGroupModal';
+import { CreateWorkspaceModal } from './components/CreateWorkspaceModal';
 import {
   fetchConfig,
   fetchGroups,
@@ -21,8 +24,11 @@ import {
   fetchSettlementStrategies,
   fetchReconciliations,
   fetchAuditEvents,
+  fetchWorkspaces,
   resetDemoData,
   initDemoSession,
+  fetchAuthSession,
+  logoutSession,
   getAuthToken,
 } from './api/client';
 import {
@@ -35,13 +41,15 @@ import {
   AuditEvent,
   SystemConfig,
   SettlementTransfer,
+  UserContext,
 } from './types';
+import { Users, Building, Plus } from 'lucide-react';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('welcome');
   const [workspaceType, setWorkspaceType] = useState<'PERSONAL' | 'BUSINESS'>('PERSONAL');
   const [groups, setGroups] = useState<Group[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('group-intl-trip-2026');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [groupDetails, setGroupDetails] = useState<Group | null>(null);
   const [balances, setBalances] = useState<GroupBalanceSummary | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -62,6 +70,17 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [paypalNotification, setPaypalNotification] = useState<string | null>(null);
 
+  // Authentication & Modals State
+  const [currentUser, setCurrentUser] = useState<UserContext | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'LOGIN' | 'REGISTER' | 'DEMO'>('LOGIN');
+  const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
+  const [createWorkspaceModalOpen, setCreateWorkspaceModalOpen] = useState(false);
+
+  // Workspaces State
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('workspace-agency-demo');
+
   // Check URL params for PayPal Return
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -78,8 +97,19 @@ export function App() {
     }
   }, []);
 
-  // Load all data
+  // Load group details, balances, expenses, settlement strategies, and reconciliations
   const loadGroupData = async (groupId: string) => {
+    if (!groupId) {
+      setGroupDetails(null);
+      setBalances(null);
+      setExpenses([]);
+      setAiItems([]);
+      setSettlementData(null);
+      setReconciliations([]);
+      setAuditEvents([]);
+      return;
+    }
+
     try {
       const [
         groupRes,
@@ -90,13 +120,13 @@ export function App() {
         reconRes,
         auditRes,
       ] = await Promise.all([
-        fetchGroupDetails(groupId),
-        fetchGroupBalances(groupId),
-        fetchExpenses(groupId),
-        fetchAIItems(groupId),
-        fetchSettlementStrategies(groupId),
-        fetchReconciliations(groupId),
-        fetchAuditEvents(groupId),
+        fetchGroupDetails(groupId).catch(() => null),
+        fetchGroupBalances(groupId).catch(() => null),
+        fetchExpenses(groupId).catch(() => []),
+        fetchAIItems(groupId).catch(() => []),
+        fetchSettlementStrategies(groupId).catch(() => null),
+        fetchReconciliations(groupId).catch(() => []),
+        fetchAuditEvents(groupId).catch(() => []),
       ]);
 
       setGroupDetails(groupRes);
@@ -114,21 +144,50 @@ export function App() {
   const initialLoad = async () => {
     setLoading(true);
     try {
-      if (!getAuthToken()) {
-        try {
-          await initDemoSession('alex-organizer');
-        } catch (authErr) {
-          console.warn('Could not initialize demo session:', authErr);
+      // 1. Check if user already has an active session
+      let user: UserContext | null = null;
+      if (getAuthToken()) {
+        const session = await fetchAuthSession();
+        if (session.authenticated && session.user) {
+          user = session.user;
+          setCurrentUser(user);
         }
       }
 
-      const [groupsRes, configRes] = await Promise.all([fetchGroups(), fetchConfig()]);
+      // If no session exists yet, default to demo session for instant judging accessibility
+      if (!user) {
+        try {
+          const demoSession = await initDemoSession('alex-organizer');
+          user = { ...demoSession.user, isDemo: true };
+          setCurrentUser(user);
+        } catch (e) {
+          console.warn('Could not auto-start demo session:', e);
+        }
+      }
+
+      // 2. Load groups, workspaces, and system config for this user
+      const [groupsRes, workspacesRes, configRes] = await Promise.all([
+        fetchGroups().catch(() => []),
+        fetchWorkspaces().catch(() => []),
+        fetchConfig().catch(() => null),
+      ]);
+
       setGroups(groupsRes);
+      setWorkspaces(workspacesRes);
       setSystemConfig(configRes);
 
-      const targetId = groupsRes[0]?.id || selectedGroupId;
-      setSelectedGroupId(targetId);
-      await loadGroupData(targetId);
+      if (workspacesRes.length > 0) {
+        setSelectedWorkspaceId(workspacesRes[0].id);
+      }
+
+      if (groupsRes.length > 0) {
+        const targetId = groupsRes[0].id;
+        setSelectedGroupId(targetId);
+        await loadGroupData(targetId);
+      } else {
+        setSelectedGroupId('');
+        setGroupDetails(null);
+      }
     } catch (err) {
       console.error('Initial load failed:', err);
     } finally {
@@ -154,6 +213,36 @@ export function App() {
     }
   };
 
+  const handleAuthSuccess = async (user: UserContext) => {
+    setCurrentUser(user);
+    await initialLoad();
+    setActiveTab('dashboard');
+  };
+
+  const handleLogout = async () => {
+    await logoutSession();
+    setCurrentUser(null);
+    setGroups([]);
+    setSelectedGroupId('');
+    setGroupDetails(null);
+    setWorkspaces([]);
+    setActiveTab('welcome');
+  };
+
+  const handleGroupCreated = async (newGroup: Group) => {
+    setGroups((prev) => [newGroup, ...prev]);
+    setSelectedGroupId(newGroup.id);
+    await loadGroupData(newGroup.id);
+    setActiveTab('dashboard');
+  };
+
+  const handleWorkspaceCreated = async (newWs: any) => {
+    setWorkspaces((prev) => [newWs, ...prev]);
+    setSelectedWorkspaceId(newWs.id);
+    setWorkspaceType('BUSINESS');
+    setActiveTab('invoices');
+  };
+
   const pendingCount = aiItems.filter((i) => i.status === 'PENDING_REVIEW').length;
 
   return (
@@ -175,6 +264,17 @@ export function App() {
           }
         }}
         onResetDemo={handleResetDemo}
+        currentUser={currentUser}
+        onOpenAuth={(mode = 'LOGIN') => {
+          setAuthModalMode(mode);
+          setAuthModalOpen(true);
+        }}
+        onLogout={handleLogout}
+        onOpenCreateGroup={() => setCreateGroupModalOpen(true)}
+        onOpenCreateWorkspace={() => setCreateWorkspaceModalOpen(true)}
+        workspaces={workspaces}
+        selectedWorkspaceId={selectedWorkspaceId}
+        setSelectedWorkspaceId={setSelectedWorkspaceId}
       />
 
       {paypalNotification && (
@@ -201,12 +301,21 @@ export function App() {
           </div>
         ) : (
           <>
-            {activeTab === 'welcome' && <LandingPage onExplore={(tab) => setActiveTab(tab)} />}
+            {activeTab === 'welcome' && (
+              <LandingPage
+                onExplore={(tab) => setActiveTab(tab)}
+                onOpenAuth={(mode = 'LOGIN') => {
+                  setAuthModalMode(mode);
+                  setAuthModalOpen(true);
+                }}
+              />
+            )}
 
             {activeTab === 'invoices' && (
               <BusinessInvoicesPage
-                workspaceId="workspace-agency-demo"
+                workspaceId={selectedWorkspaceId || 'workspace-agency-demo'}
                 onNavigateToReconciliation={() => setActiveTab('reconciliation')}
+                onOpenCreateWorkspace={() => setCreateWorkspaceModalOpen(true)}
               />
             )}
 
@@ -216,15 +325,34 @@ export function App() {
                 balanceSummary={balances}
                 onNavigate={(tab) => setActiveTab(tab)}
                 pendingReviewsCount={pendingCount}
+                onOpenCreateGroup={() => setCreateGroupModalOpen(true)}
+                onOpenAuth={(mode = 'DEMO') => {
+                  setAuthModalMode(mode);
+                  setAuthModalOpen(true);
+                }}
               />
             )}
 
             {activeTab === 'group' && (
-              <GroupPage
-                group={groupDetails}
-                balanceSummary={balances}
-                onRefresh={() => loadGroupData(selectedGroupId)}
-              />
+              groupDetails ? (
+                <GroupPage
+                  group={groupDetails}
+                  balanceSummary={balances}
+                  onRefresh={() => loadGroupData(selectedGroupId)}
+                />
+              ) : (
+                <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center max-w-md mx-auto space-y-4">
+                  <Users className="w-10 h-10 text-slate-400 mx-auto" />
+                  <h3 className="text-sm font-bold text-slate-900">No Group Selected</h3>
+                  <p className="text-xs text-slate-500">Create a group or select an existing one to manage members.</p>
+                  <button
+                    onClick={() => setCreateGroupModalOpen(true)}
+                    className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold"
+                  >
+                    + Create Group
+                  </button>
+                </div>
+              )
             )}
 
             {activeTab === 'ai-import' && (
@@ -245,11 +373,24 @@ export function App() {
             )}
 
             {activeTab === 'ledger' && (
-              <LedgerPage
-                group={groupDetails}
-                expenses={expenses}
-                onRefresh={() => loadGroupData(selectedGroupId)}
-              />
+              groupDetails ? (
+                <LedgerPage
+                  group={groupDetails}
+                  expenses={expenses}
+                  onRefresh={() => loadGroupData(selectedGroupId)}
+                />
+              ) : (
+                <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center max-w-md mx-auto space-y-4">
+                  <h3 className="text-sm font-bold text-slate-900">No Ledger Available</h3>
+                  <p className="text-xs text-slate-500">Create your first group to start recording and splitting expenses.</p>
+                  <button
+                    onClick={() => setCreateGroupModalOpen(true)}
+                    className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold"
+                  >
+                    + Create Group
+                  </button>
+                </div>
+              )
             )}
 
             {activeTab === 'optimizer' && (
@@ -286,19 +427,39 @@ export function App() {
         )}
       </main>
 
+      {/* Modals */}
+      <AuthModal
+        isOpen={authModalOpen}
+        initialMode={authModalMode}
+        onClose={() => setAuthModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+      />
+
+      <CreateGroupModal
+        isOpen={createGroupModalOpen}
+        onClose={() => setCreateGroupModalOpen(false)}
+        onGroupCreated={handleGroupCreated}
+      />
+
+      <CreateWorkspaceModal
+        isOpen={createWorkspaceModalOpen}
+        onClose={() => setCreateWorkspaceModalOpen(false)}
+        onWorkspaceCreated={handleWorkspaceCreated}
+      />
+
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200/80 py-6 text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-900">ClearSettle</span>
-            <span>— AI-Assisted Group Expense Reconciliation Platform</span>
+            <span>— Financial Obligation Management & Payment Reconciliation</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>PayPal Sandbox Integration</span>
+            <span>PayPal Orders v2 REST</span>
             <span>•</span>
-            <span>Exact Decimal Arithmetic</span>
+            <span>Exact Decimal.js Arithmetic</span>
             <span>•</span>
-            <span>Responsible AI Classification</span>
+            <span>SHA-256 Audit Chain</span>
           </div>
         </div>
       </footer>

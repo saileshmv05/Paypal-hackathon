@@ -20,6 +20,8 @@ interface DashboardPageProps {
   balanceSummary: GroupBalanceSummary | null;
   onNavigate: (tab: string) => void;
   pendingReviewsCount: number;
+  onOpenCreateGroup?: () => void;
+  onOpenAuth?: (mode?: 'LOGIN' | 'REGISTER' | 'DEMO') => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
@@ -27,7 +29,46 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   balanceSummary,
   onNavigate,
   pendingReviewsCount,
+  onOpenCreateGroup,
+  onOpenAuth,
 }) => {
+  if (!group) {
+    return (
+      <div className="space-y-6 py-8">
+        <HonestyGuaranteeBanner />
+        <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-14 text-center max-w-lg mx-auto space-y-5 shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto border border-indigo-100">
+            <Users className="w-7 h-7" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight">No Expense Groups Created Yet</h2>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+              Start by creating your first travel or shared expense group. You will be able to invite participants, record multi-currency expenses, and calculate exact settlements.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
+            {onOpenCreateGroup && (
+              <button
+                onClick={onOpenCreateGroup}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-colors"
+              >
+                + Create Personal Group
+              </button>
+            )}
+            {onOpenAuth && (
+              <button
+                onClick={() => onOpenAuth('DEMO')}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-semibold transition-colors"
+              >
+                Switch to Demo Mode
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const baseCurrency = balanceSummary?.baseCurrency || 'EUR';
   const balances = balanceSummary?.balances || [];
 

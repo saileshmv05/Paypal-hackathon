@@ -67,8 +67,69 @@ interface SessionRecord {
 
 const activeSessions = new Map<string, SessionRecord>();
 
+// Password hashing utilities using Node.js crypto (timing-safe scrypt)
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+export function verifyPassword(password: string, storedHash: string): boolean {
+  try {
+    const [salt, key] = storedHash.split(':');
+    if (!salt || !key) return false;
+    const keyBuffer = Buffer.from(key, 'hex');
+    const derived = crypto.scryptSync(password, salt, 64);
+    return crypto.timingSafeEqual(keyBuffer, derived);
+  } catch {
+    return false;
+  }
+}
+
 // Clean expired sessions periodically
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export function createUserSession(user: { id: string; name: string; email: string; role?: string }): {
+  token: string;
+  user: UserContext;
+  expiresAt: string;
+} {
+  const token = `cs_${crypto.randomBytes(32).toString('hex')}`;
+  const now = Date.now();
+  const expiresAtMs = now + SESSION_TTL_MS;
+
+  const memberGroups: any[] = db
+    .prepare('SELECT group_id FROM group_members WHERE email = ? OR id = ?')
+    .all(user.email, user.id);
+  const groupIds = memberGroups.map((g) => g.group_id);
+
+  const userWorkspaces: any[] = db
+    .prepare('SELECT id FROM workspaces WHERE owner_id = ?')
+    .all(user.id);
+  const workspaceIds = userWorkspaces.map((w) => w.id);
+
+  const userContext: UserContext = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: (user.role as any) || 'MEMBER',
+    groupIds,
+    workspaceIds,
+  };
+
+  activeSessions.set(token, {
+    token,
+    user: userContext,
+    createdAt: now,
+    expiresAt: expiresAtMs,
+  });
+
+  return {
+    token,
+    user: userContext,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  };
+}
 
 export function createSession(personaKey: string): { token: string; user: UserContext; expiresAt: string } {
   const persona = DEMO_PERSONAS[personaKey];
@@ -112,6 +173,27 @@ export function getSession(token: string): UserContext | null {
   if (Date.now() > session.expiresAt) {
     activeSessions.delete(token);
     return null;
+  }
+
+  // Dynamic refresh for user's created/joined groups and workspaces
+  if (
+    session.user.id &&
+    !session.user.id.startsWith('user-alex') &&
+    !session.user.id.startsWith('user-sam') &&
+    !session.user.id.startsWith('user-agency')
+  ) {
+    try {
+      const memberGroups: any[] = db
+        .prepare('SELECT group_id FROM group_members WHERE email = ? OR id = ?')
+        .all(session.user.email, session.user.id);
+      const userWorkspaces: any[] = db
+        .prepare('SELECT id FROM workspaces WHERE owner_id = ?')
+        .all(session.user.id);
+      session.user.groupIds = Array.from(new Set([...memberGroups.map((g) => g.group_id)]));
+      session.user.workspaceIds = Array.from(new Set([...userWorkspaces.map((w) => w.id)]));
+    } catch {
+      // Ignore fallback if table is locking
+    }
   }
 
   return session.user;
@@ -200,8 +282,11 @@ export function requireGroupAccess(req: AuthenticatedRequest, res: Response, nex
   const isMemberInDb = db
     .prepare('SELECT id FROM group_members WHERE group_id = ? AND (email = ? OR id = ?)')
     .get(groupId, req.user.email, req.user.id);
+  const isCreatorInDb = db
+    .prepare('SELECT id FROM groups WHERE id = ? AND created_by = ?')
+    .get(groupId, req.user.id);
 
-  if (!isMemberInDb && !req.user.groupIds.includes(groupId)) {
+  if (!isMemberInDb && !isCreatorInDb && !req.user.groupIds.includes(groupId)) {
     return res.status(403).json({
       error: 'Access denied: You do not have permission to view or modify this group ledger.',
       code: 'FORBIDDEN_GROUP_ACCESS',
@@ -233,7 +318,11 @@ export function requireWorkspaceAccess(req: AuthenticatedRequest, res: Response,
     return res.status(404).json({ error: `Workspace ${workspaceId} not found.` });
   }
 
-  if (req.user.role === 'ADMIN' || req.user.workspaceIds.includes(workspaceId)) {
+  const isOwnerInDb = db
+    .prepare('SELECT id FROM workspaces WHERE id = ? AND owner_id = ?')
+    .get(workspaceId, req.user.id);
+
+  if (req.user.role === 'ADMIN' || isOwnerInDb || req.user.workspaceIds.includes(workspaceId)) {
     return next();
   }
 
